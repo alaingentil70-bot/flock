@@ -1,0 +1,1626 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<script>window.__SEED__={"data": {}, "assets": {}};</script>
+<script>
+(function(){
+"use strict";
+const SEED=window.__SEED__; delete window.__SEED__;
+const KEY="broiler-flock-ledger-v1";
+const urls=new Map(); let idb=null;
+function openIDB(){return new Promise((res)=>{try{const r=indexedDB.open("broiler-flock-ledger",1);r.onupgradeneeded=()=>r.result.createObjectStore("assets");r.onsuccess=()=>res(r.result);r.onerror=()=>res(null)}catch(e){res(null)}})}
+function idbAll(){return new Promise(res=>{if(!idb)return res([]);const out=[];const tx=idb.transaction("assets","readonly");const c=tx.objectStore("assets").openCursor();c.onsuccess=()=>{const cur=c.result;if(cur){out.push([cur.key,cur.value]);cur.continue()}else res(out)};c.onerror=()=>res(out)})}
+function idbPut(id,b){return new Promise((res,rej)=>{if(!idb)return rej({code:"unavailable"});const tx=idb.transaction("assets","readwrite");tx.objectStore("assets").put(b,id);tx.oncomplete=()=>res();tx.onerror=()=>rej({code:"quota_exceeded"})})}
+function idbDel(id){return new Promise(res=>{if(!idb)return res();const tx=idb.transaction("assets","readwrite");tx.objectStore("assets").delete(id);tx.oncomplete=()=>res();tx.onerror=()=>res()})}
+function dataURLtoBlob(u){const [h,b]=u.split(",");const mime=h.match(/data:([^;]+)/)[1];const bin=atob(b);const a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);return new Blob([a],{type:mime})}
+function blobToDataURL(b){return new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)})}
+window.__assetURL=id=>urls.get(id)||"";
+let store=null;
+function load(){try{const t=localStorage.getItem(KEY);if(t)return JSON.parse(t)}catch(e){}return null}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(store));return true}catch(e){return false}}
+const listeners=new Set();
+function notify(){listeners.forEach(fn=>{try{fn()}catch(e){console.error(e)}})}
+const rid=()=>Math.random().toString(36).slice(2,12)+Date.now().toString(36);
+function snap(id,d){return{id,exists:!!d,data:()=>d?JSON.parse(JSON.stringify(d)):undefined,metadata:{fromCache:false,hasPendingWrites:false}}}
+function col(name){
+  const c=()=>(store[name]=store[name]||{});
+  const ref={path:name,
+    doc(id){id=id||rid();return{id,path:name+"/"+id,
+      get:async()=>snap(id,c()[id]),
+      set:async(d)=>{c()[id]=JSON.parse(JSON.stringify(d));if(!save())throw{code:"quota_exceeded"};notify()},
+      update:async(d)=>{if(!c()[id])throw{code:"invalid_argument"};Object.assign(c()[id],JSON.parse(JSON.stringify(d)));save();notify()},
+      delete:async()=>{delete c()[id];save();notify()},
+      onSnapshot(next){const fn=()=>next(snap(id,c()[id]));listeners.add(fn);setTimeout(fn,0);return()=>listeners.delete(fn)}}},
+    add:async(d)=>{const r=ref.doc();await r.set(d);return r},
+    onSnapshot(next){const fn=()=>{const docs=Object.keys(c()).sort().map(k=>snap(k,c()[k]));next({docs,size:docs.length,empty:!docs.length,docChanges:()=>[],metadata:{fromCache:false,hasPendingWrites:false}})};listeners.add(fn);setTimeout(fn,0);return()=>listeners.delete(fn)}};
+  return ref;
+}
+const db={collection:col,doc(p){const [c,i]=p.split("/");return col(c).doc(i)}};
+const assets={
+  upload:async(b)=>{const id=rid();await idbPut(id,b);urls.set(id,URL.createObjectURL(b));return{id,url:urls.get(id),sizeBytes:b.size,contentType:b.type}},
+  delete:async(id)=>{await idbDel(id);urls.delete(id);return{}},
+  list:async()=>({assets:[],usage:{}})};
+function saveFile(name,data,type){const b=data instanceof Blob?data:new Blob([data],{type:type||"application/octet-stream"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
+const downloads={save:async({filename,data})=>saveFile(filename,data)};
+const ready=(async()=>{
+  idb=await openIDB();
+  store=load();
+  if(!store){store=JSON.parse(JSON.stringify(SEED.data));save();for(const [id,u] of Object.entries(SEED.assets)){try{await idbPut(id,dataURLtoBlob(u))}catch(e){}}}
+  else{let ch=false;for(const c of Object.keys(SEED.data)){if(!store[c]||!Object.keys(store[c]).length){if(Object.keys(SEED.data[c]).length){store[c]=JSON.parse(JSON.stringify(SEED.data[c]));ch=true}}}if(ch)save()}
+  const all=await idbAll();
+  for(const [id,b] of all)urls.set(id,URL.createObjectURL(b));
+  for(const [id,u] of Object.entries(SEED.assets))if(!urls.has(id))urls.set(id,u);
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",addBackupUI);else addBackupUI();
+})();
+window.claude={use:async n=>{await ready;return n==="db"?db:n==="user"?{can:async()=>true,isOwner:async()=>true,canEdit:async()=>true}:n==="assets"?(idb?assets:null):n==="downloads"?downloads:null}};
+function addBackupUI(){
+  const row=document.querySelector(".brandrow");if(!row)return;
+  const mk=(t,fn)=>{const b=document.createElement("button");b.type="button";b.className="btn sm";b.textContent=t;b.onclick=fn;return b};
+  const inp=document.createElement("input");inp.type="file";inp.accept=".json,application/json";inp.hidden=true;
+  inp.onchange=async()=>{const f=inp.files[0];if(!f)return;try{const j=JSON.parse(await f.text());if(!j||!j.data||!j.data.farm)throw 0;
+      store=j.data;save();for(const [id,u] of Object.entries(j.assets||{})){const b=dataURLtoBlob(u);await idbPut(id,b);urls.set(id,URL.createObjectURL(b))}
+      notify();msg("Backup restored")}catch(e){msg("That file is not a ledger backup.")}inp.value=""};
+  const back=mk("Back up",async()=>{const used=new Set(Object.values(store.photos||{}).map(p=>p.assetId));const out={app:"broiler-flock-ledger",savedAt:new Date().toISOString(),data:store,assets:{}};
+      const all=await idbAll();for(const [id,b] of all)if(used.has(id))out.assets[id]=await blobToDataURL(b);
+      const d=new Date();saveFile(`flock-ledger-backup-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.json`,JSON.stringify(out),"application/json");msg("Backup saved to your downloads")});
+  const rest=mk("Restore",()=>inp.click());
+  back.title="Save all records and photos to one file";rest.title="Load a backup file";
+  const exp=document.getElementById("exportBtn");row.insertBefore(back,exp);row.insertBefore(rest,exp);row.appendChild(inp);
+}
+function msg(t){const e=document.createElement("div");e.className="toast";e.setAttribute("role","status");e.setAttribute("aria-live","polite");e.textContent=t;document.body.appendChild(e);setTimeout(()=>e.remove(),2800)}
+})();
+</script>
+<title>Broiler Flock Ledger</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky top bar with a 45-tick cycle ruler, tab strip, one working view at a time; cards only where a block is its own object. */
+:root{
+  --bg:#F2F4EE; --surface:#FFFFFF; --sunk:#E8ECE3; --ink:#192017; --ink2:#465042; --muted:#6B7363; --line:#D8DED1;
+  --accent:#A95F00; --accent-ink:#FFFFFF; --accent-soft:#F5E6CC;
+  --anti:#A95F00; --supp:#2F6B4F;
+  --good:#24723F; --good-soft:#DDEFE2; --warn:#9A6100; --warn-soft:#F7EBD2; --crit:#B42318; --crit-soft:#F9E1DE; --info:#3D5A80; --info-soft:#E1E8F2;
+  --f-display:"Archivo","Arial Narrow",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  --r:6px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10140F; --surface:#181E16; --sunk:#0C0F0B; --ink:#E5EADF; --ink2:#B6BEAE; --muted:#8A9383; --line:#2C3529;
+  --accent:#E3A043; --accent-ink:#1A1205; --accent-soft:#3A2B12;
+  --anti:#E3A043; --supp:#6BBF95;
+  --good:#6CC488; --good-soft:#18301F; --warn:#E5B04D; --warn-soft:#352813; --crit:#F27B6B; --crit-soft:#3A1915; --info:#8FB0DA; --info-soft:#1A2433;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#10140F; --surface:#181E16; --sunk:#0C0F0B; --ink:#E5EADF; --ink2:#B6BEAE; --muted:#8A9383; --line:#2C3529;
+  --accent:#E3A043; --accent-ink:#1A1205; --accent-soft:#3A2B12;
+  --anti:#E3A043; --supp:#6BBF95;
+  --good:#6CC488; --good-soft:#18301F; --warn:#E5B04D; --warn-soft:#352813; --crit:#F27B6B; --crit-soft:#3A1915; --info:#8FB0DA; --info-soft:#1A2433;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--f-body);margin:0}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--surface)}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.num,.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+h1,h2,h3{font-family:var(--f-display);font-stretch:85%;letter-spacing:.005em;text-wrap:balance;margin:0}
+h2{font-size:1.35rem;font-weight:700}
+h3{font-size:1.02rem;font-weight:700}
+.eyebrow{font:600 .72rem/1.2 var(--f-body);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.muted{color:var(--muted)} .ink2{color:var(--ink2)}
+a{color:var(--accent)}
+button,input,select,textarea{font:inherit;color:inherit}
+button,a,label,summary,[data-tab],[data-go],[data-add],[data-edit],[data-act],[data-day],tr.click{touch-action:manipulation}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* top bar */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--surface);border-bottom:1px solid var(--line)}
+.top .wrap{display:flex;flex-direction:column;gap:10px;padding-block:12px 0}
+.brandrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:baseline;gap:10px;min-width:0}
+.brand h1{font-size:1.45rem;font-weight:800;font-stretch:78%;text-transform:uppercase;letter-spacing:.02em}
+.brand .cyc{color:var(--muted);font-size:.85rem;white-space:nowrap}
+.spacer{flex:1}
+.sync{font-size:.78rem;color:var(--muted);display:flex;align-items:center;gap:6px}
+.sync i{width:7px;height:7px;border-radius:50%;background:var(--muted);display:inline-block}
+.sync.ok i{background:var(--good)} .sync.bad i{background:var(--crit)}
+.ruler{display:grid;grid-template-columns:repeat(45,1fr);gap:2px;align-items:end;height:22px}
+.ruler span{height:8px;background:var(--line);border-radius:1px;position:relative}
+.ruler span.past{background:var(--ink2)}
+.ruler span.death{background:var(--crit);height:14px}
+.ruler span.today{background:var(--accent);height:22px}
+.ruler span.wk{height:12px}
+.ruler span.sale{outline:2px solid var(--accent);outline-offset:1px}
+.rulerlab{display:flex;justify-content:space-between;font-size:.72rem;color:var(--muted);font-family:var(--f-mono);gap:8px}
+@media (max-width:560px){.rulerlab span:nth-child(2){display:none}.brand h1{font-size:1.15rem}.brand{flex-wrap:wrap;row-gap:0}}
+.tabs{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;margin:0 -4px}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{background:none;border:0;padding:10px 12px 11px;font-weight:600;font-size:.88rem;color:var(--ink2);border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
+.tabs button[aria-current="page"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tabs button:hover{color:var(--ink)}
+
+main{padding-block:22px 64px}
+.view{display:flex;flex-direction:column;gap:22px}
+.vhead{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+.vhead p{margin:4px 0 0;color:var(--ink2);max-width:68ch}
+
+/* buttons & chips */
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);padding:8px 13px;border-radius:var(--r);font-weight:600;font-size:.86rem;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--ink2)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.pri:hover{filter:brightness(1.06)}
+.btn.ghost{background:none;border-color:transparent;color:var(--ink2)}
+.btn.danger{color:var(--crit);border-color:var(--crit)}
+.btn.sm{padding:5px 9px;font-size:.8rem}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:.74rem;font-weight:600;padding:2px 8px;border-radius:99px;white-space:nowrap;letter-spacing:.01em}
+.chip.good{background:var(--good-soft);color:var(--good)} .chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.crit{background:var(--crit-soft);color:var(--crit)} .chip.info{background:var(--info-soft);color:var(--info)}
+.chip.neutral{background:var(--sunk);color:var(--ink2)}
+
+/* panels */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;min-width:0}
+.panel>h3{margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.panel>h3 .spacer{flex:1}
+.grid2{align-items:start;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:18px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:18px}
+
+/* hero */
+.hero{display:grid;grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,1fr));gap:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.hero>div{padding:18px 20px;border-left:1px solid var(--line);min-width:0}
+.hero>div:first-child{border-left:0}
+.big{font-family:var(--f-display);font-weight:800;font-stretch:75%;font-size:3.1rem;line-height:1;letter-spacing:-.01em}
+.big small{font-size:1.2rem;color:var(--muted);font-weight:600;font-stretch:85%}
+.mid{font-family:var(--f-mono);font-size:1.55rem;font-weight:500;line-height:1.15;margin-top:6px}
+.sub{font-size:.82rem;color:var(--ink2);margin-top:6px}
+@media (max-width:860px){.hero{grid-template-columns:1fr 1fr}.hero>div:nth-child(3){border-left:0}.hero>div:nth-child(n+3){border-top:1px solid var(--line)}}
+@media (max-width:460px){.hero{grid-template-columns:1fr}.hero>div{border-left:0;border-top:1px solid var(--line)}.hero>div:first-child{border-top:0}}
+
+/* alerts */
+.alerts{display:flex;flex-direction:column;gap:0}
+.alert{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;padding:11px 0;border-top:1px solid var(--line)}
+.alert:first-child{border-top:0;padding-top:0}
+.alert b{font-weight:600}
+.alert p{margin:0;grid-column:2;color:var(--ink2);font-size:.88rem}
+
+/* tables */
+.tw{overflow-x:auto;margin:0 -2px}
+table{border-collapse:collapse;width:100%;font-size:.88rem}
+th{font:600 .7rem/1.2 var(--f-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+td.n,th.n{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.click{cursor:pointer} tr.click:hover td{background:var(--sunk)}
+tr.future td{color:var(--muted)}
+tr.todayrow td{background:var(--accent-soft)}
+tr.wkrow td{background:var(--sunk);font-size:.74rem;color:var(--ink2);padding:6px 10px;letter-spacing:.03em}
+tr.tot td{font-weight:600;border-bottom:0;border-top:2px solid var(--ink2)}
+td.note{min-width:240px;max-width:520px;color:var(--ink2)}
+.dz{color:var(--crit);font-weight:600}
+
+/* forms */
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field label{font-size:.78rem;font-weight:600;color:var(--ink2)}
+.field .hint{font-size:.75rem;color:var(--muted)}
+input[type=text],input[type=number],input[type=date],select,textarea{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:9px 10px;width:100%;min-width:0;font-size:16px}
+textarea{min-height:92px;resize:vertical;line-height:1.45}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);outline:none}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:14px}
+.fgrid .wide{grid-column:1/-1}
+.check{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);cursor:pointer}
+.check:first-child{border-top:0}
+.check input{width:18px;height:18px;margin-top:2px;accent-color:var(--accent);flex:none}
+.check.done span{color:var(--muted);text-decoration:line-through}
+.stepper{display:flex;align-items:center;border:1px solid var(--line);border-radius:5px;width:max-content;background:var(--bg)}
+.stepper button{border:0;background:none;width:44px;height:44px;font-size:1.2rem;cursor:pointer}
+.stepper output{min-width:34px;text-align:center;font-family:var(--f-mono);font-size:1.1rem}
+/* tap-to-log buttons */
+.qgroup{margin-top:14px}
+.qgroup .eyebrow{margin-bottom:7px}
+.tags{display:flex;flex-wrap:wrap;gap:7px}
+.tap{border:1px solid var(--line);background:var(--bg);color:var(--ink2);border-radius:99px;padding:8px 13px;min-height:40px;font-size:.86rem;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.tap:hover{border-color:var(--ink2)}
+.tap[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--ink)}
+.tap.ok[aria-pressed="true"]{background:var(--good-soft);border-color:var(--good);color:var(--good)}
+.tap.bad[aria-pressed="true"]{background:var(--crit-soft);border-color:var(--crit);color:var(--crit)}
+.tap[aria-pressed="true"]::before{content:"✓ "}
+.seg{display:flex;border:1px solid var(--line);border-radius:5px;overflow:hidden;background:var(--bg)}
+.segb{flex:1;border:0;border-left:1px solid var(--line);background:none;color:var(--ink2);min-height:42px;padding:0 8px;font-size:.88rem;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.segb:first-child{border-left:0}
+.segb[aria-pressed="true"]{background:var(--sunk);color:var(--ink)}
+.segb.good[aria-pressed="true"]{background:var(--good-soft);color:var(--good)}
+.segb.warn[aria-pressed="true"]{background:var(--warn-soft);color:var(--warn)}
+.segb.crit[aria-pressed="true"]{background:var(--crit-soft);color:var(--crit)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.rangehead{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.rangehead output{font-family:var(--f-mono);font-weight:500}
+
+/* stat list */
+.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0}
+.kv>div{padding:8px 0;border-top:1px solid var(--line);font-size:.9rem}
+.kv>div:nth-child(-n+2){border-top:0}
+.kv>div:nth-child(even){text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.kv .em{font-weight:700}
+.kv .sec{font:600 .7rem/1 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:16px;text-align:left!important;font-family:var(--f-body)!important}
+
+/* bars */
+.hbar{display:grid;grid-template-columns:minmax(90px,150px) minmax(0,1fr) auto;gap:6px 10px;align-items:center;font-size:.85rem}
+.hbar .tr{height:12px;background:var(--sunk);border-radius:2px;overflow:hidden}
+.hbar .tr i{display:block;height:100%;background:var(--accent);border-radius:0 3px 3px 0}
+.hbar .v{font-family:var(--f-mono);font-size:.8rem;text-align:right;white-space:nowrap}
+
+/* chart */
+.chart{width:100%;height:auto;display:block}
+.chart text{fill:var(--muted);font:11px var(--f-mono)}
+.chart .lab{fill:var(--ink2);font:12px var(--f-body)}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .ref{stroke:var(--muted);stroke-dasharray:3 4;stroke-width:1}
+.chart .series{fill:none;stroke:var(--ink);stroke-width:2}
+.chart .proj{fill:none;stroke:var(--muted);stroke-width:2;stroke-dasharray:4 4}
+.chart .todayln{stroke:var(--accent);stroke-width:2}
+.chart .saleln{stroke:var(--accent);stroke-width:2;stroke-dasharray:6 3}
+.chart .hit{fill:transparent;cursor:crosshair}
+.chart .hit:hover{fill:var(--ink);fill-opacity:.05}
+.chart .dot{fill:var(--crit);stroke:var(--surface);stroke-width:2}
+.chart .bar-anti{fill:var(--anti)} .chart .bar-supp{fill:var(--supp)}
+.chart .wd-anti{fill:url(#hatchA)} .chart .wd-supp{fill:url(#hatchS)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.8rem;color:var(--ink2);margin-top:10px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:10px;border-radius:2px;display:inline-block}
+#tip{position:fixed;z-index:60;pointer-events:none;background:var(--ink);color:var(--bg);padding:8px 10px;border-radius:6px;font-size:.8rem;max-width:280px;line-height:1.45;box-shadow:0 6px 24px rgba(0,0,0,.22)}
+#tip b{font-weight:600}
+#tip .tipk{color:var(--muted);font-weight:400}
+/* premium chart toolkit */
+.chart .gridln{stroke:var(--line);stroke-width:1;shape-rendering:crispEdges}
+.chart .gridln.soft{stroke:var(--line);opacity:.55}
+.chart .axis{stroke:var(--line);stroke-width:1;shape-rendering:crispEdges}
+.chart .series2{fill:none;stroke:var(--info);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.chart .series{stroke-linejoin:round;stroke-linecap:round}
+.chart .band{stroke:none}
+.chart .xhair line{stroke:var(--ink2);stroke-width:1;stroke-dasharray:4 4;opacity:.55}
+.chart .focus{fill:var(--surface);stroke-width:2.5}
+.chart .focus.s1{stroke:var(--ink)} .chart .focus.s2{stroke:var(--info)} .chart .focus.s3{stroke:var(--accent)}
+.chart .tag{fill:var(--sunk)} .chart .tagt{fill:var(--ink);font:600 11px var(--f-mono)}
+.chart .barlab{fill:var(--ink2);font:11px var(--f-mono)}
+/* sparklines */
+.spark{display:block;width:100%;height:44px}
+.spark path.ln{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.spark .dot{stroke:var(--surface);stroke-width:1.5}
+.trend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.trend>div{padding:14px 16px 12px;border-left:1px solid var(--line);min-width:0}
+.trend>div:first-child{border-left:0}
+.trend .tval{font-family:var(--f-mono);font-size:1.5rem;font-weight:500;line-height:1.1;margin-top:2px}
+.trend .tval small{font-size:.9rem;color:var(--muted);font-weight:400}
+.trend .tsub{font-size:.78rem;color:var(--muted);margin-top:3px}
+@media (max-width:620px){.trend{grid-template-columns:1fr}.trend>div{border-left:0;border-top:1px solid var(--line)}.trend>div:first-child{border-top:0}}
+/* this week + do next */
+.week{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:0;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--surface)}
+.week>div{padding:12px 15px;border-left:1px solid var(--line)}
+.week>div:first-child{border-left:0}
+.week .wn{font-family:var(--f-mono);font-size:1.25rem;line-height:1.1}
+.week .wl{font-size:.74rem;color:var(--muted);margin-top:3px}
+@media (max-width:620px){.week>div{border-left:0;border-top:1px solid var(--line)}.week>div:nth-child(-n+2){border-top:0}.week>div:nth-child(2){border-left:1px solid var(--line)}}
+.donext{display:flex;flex-direction:column;gap:0}
+.dnx{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:3px 12px;align-items:center;padding:12px 0;border-top:1px solid var(--line);text-align:left;background:none;border-left:0;border-right:0;border-bottom:0;cursor:pointer;width:100%;font:inherit;color:inherit}
+.dnx:first-child{border-top:0;padding-top:2px}
+.dnx:hover b{text-decoration:underline}
+.dnx .num{font-family:var(--f-display);font-weight:800;font-stretch:80%;font-size:1.4rem;color:var(--muted);grid-row:span 2;align-self:center;width:1.1em;text-align:center}
+.dnx b{font-weight:600}
+.dnx p{margin:0;color:var(--ink2);font-size:.84rem;grid-column:2}
+.dnx .go{color:var(--muted);font-size:1.3rem;line-height:1;grid-row:span 2}
+.legend i.dash{border-top:2px dashed var(--muted);height:0;width:14px;border-radius:0;background:none}
+.legend i.line{height:2px;border-radius:0}
+.legend i.sq{width:11px;height:11px;border-radius:2px}
+.legend i.round{border-radius:50%;width:9px;height:9px}
+
+/* modal */
+dialog{border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);padding:0;width:min(620px,calc(100vw - 32px));max-height:calc(100dvh - 48px)}
+dialog::backdrop{background:rgba(10,14,9,.45)}
+.mhead{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.mbody{padding:18px 20px;overflow:auto}
+.mfoot{display:flex;gap:8px;padding:14px 20px;border-top:1px solid var(--line);flex-wrap:wrap;align-items:center}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:6px;font-size:.88rem;z-index:70;max-width:calc(100vw - 32px)}
+
+/* guide */
+.prose{max-width:72ch}
+.prose p,.prose li{color:var(--ink2)}
+.prose ul{padding-left:1.15em;margin:6px 0}
+.prose li{margin:3px 0}
+.timeline{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 16px}
+.timeline>div{padding:10px 0;border-top:1px solid var(--line)}
+.timeline>.d{font-family:var(--f-mono);font-size:.82rem;color:var(--muted);white-space:nowrap}
+.timeline>div:nth-child(-n+2){border-top:0}
+.empty{padding:28px;text-align:center;color:var(--ink2);border:1px dashed var(--line);border-radius:var(--r)}
+.sens td{text-align:right}
+.sens td.neg{color:var(--crit)}
+.sens td.cur{outline:2px solid var(--accent);outline-offset:-2px}
+.badge-type{font-size:.72rem;font-weight:600;color:var(--ink2);display:inline-flex;align-items:center;gap:5px}
+.badge-type i{width:9px;height:9px;border-radius:2px;display:inline-block}
+.mat{table-layout:fixed;min-width:760px}.mat th:nth-child(1){width:27%}.mat th:nth-child(2){width:10%}.mat th:nth-child(3){width:11%}.mat th:nth-child(4){width:12%}.mat th:nth-child(5){width:14%}.mat th:nth-child(6){width:9%}
+.report{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:24px;display:flex;flex-direction:column;gap:20px}
+.rhead{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;border-bottom:2px solid var(--ink);padding-bottom:16px}
+.rkpi{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;border:1px solid var(--line);border-radius:var(--r)}
+.rkpi>div{padding:14px 16px;border-left:1px solid var(--line);border-top:1px solid var(--line);min-width:0}
+.rkpi>div:nth-child(4n+1){border-left:0}.rkpi>div:nth-child(-n+4){border-top:0}
+@media (max-width:760px){.rkpi{grid-template-columns:1fr 1fr}.rkpi>div{border-left:1px solid var(--line);border-top:1px solid var(--line)}.rkpi>div:nth-child(odd){border-left:0}.rkpi>div:nth-child(-n+2){border-top:0}}
+.rsec{min-width:0}.rsec>h3{margin-bottom:10px}
+/* investor report branding */
+.report{position:relative;overflow:hidden}
+.report::before{content:"";position:absolute;inset:0 0 auto;height:4px;background:linear-gradient(90deg,var(--accent),var(--supp))}
+.rbrand{display:flex;gap:13px;align-items:center;min-width:0}
+.brandico{width:46px;height:46px;flex:none}
+.rfarm{font-size:1.8rem;font-stretch:80%;text-transform:uppercase;letter-spacing:.01em;line-height:1.02}
+.rmeta{margin:4px 0 0;color:var(--ink2);font-size:.86rem}
+.rstatus{text-align:right;flex:none}
+.rsummary{background:var(--sunk);border-radius:var(--r);padding:14px 18px;font-size:1.02rem;line-height:1.45;color:var(--ink)}
+.rsummary b{font-weight:700}
+.rfoot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line);padding-top:14px;margin-top:4px}
+@media (max-width:560px){.rfarm{font-size:1.4rem}.brandico{width:40px;height:40px}}
+@media print{
+  :root{--bg:#FFFFFF;--surface:#FFFFFF}
+  body{padding:0!important;background:#fff}
+  .report{border:0;border-radius:0;max-width:none;padding:0 2mm;gap:16px}
+  .report::before{display:none}
+  .rsec,.rkpi,.compare,.report figure,.chart,.rsummary,.hero,.panel{break-inside:avoid;page-break-inside:avoid}
+  .rhead{break-after:avoid}
+  @page{margin:13mm}
+}
+.chart .gdot{fill:var(--accent);stroke:var(--surface);stroke-width:2}
+/* photos */
+.days{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px}
+.tile{position:relative;aspect-ratio:1;border-radius:5px;overflow:hidden;background:var(--sunk);border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:2px;cursor:pointer;color:var(--ink2);font-size:.8rem;padding:0;max-width:100%}
+.tile.has{border:0}
+.tile.fut{opacity:.45;cursor:default}
+.tile.today{outline:2px solid var(--accent);outline-offset:1px}
+.tile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.tile .cap{position:absolute;left:0;right:0;bottom:0;padding:16px 7px 5px;background:linear-gradient(transparent,rgba(0,0,0,.66));color:#fff;font-size:.74rem;text-align:left;display:flex;justify-content:space-between;gap:4px}
+.tile b{font-family:var(--f-mono);font-weight:500;font-size:.9rem;color:var(--ink)}
+.tile .plus{font-size:.72rem;color:var(--muted)}
+.thumbs{display:flex;gap:8px;flex-wrap:wrap}
+.thumb{width:84px;height:84px;border-radius:5px;overflow:hidden;border:0;padding:0;background:var(--sunk);cursor:zoom-in;flex:none;position:relative}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb.sm{width:40px;height:40px}
+.addph{width:84px;height:84px;border:1px dashed var(--line);border-radius:5px;background:none;color:var(--ink2);font-size:.75rem;cursor:pointer;flex:none}
+.pdays{display:flex;flex-direction:column}
+.pday{display:grid;grid-template-columns:120px minmax(0,1fr);gap:14px;padding:12px 0;border-top:1px solid var(--line)}
+.pday:first-child{border-top:0;padding-top:0}
+.pday .when b{font-family:var(--f-mono);font-weight:500;font-size:1rem;display:block}
+.pday .when span{font-size:.8rem;color:var(--muted)}
+@media (max-width:520px){.pday{grid-template-columns:1fr;gap:6px}}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.compare figure{margin:0;display:flex;flex-direction:column;gap:6px;min-width:0}
+.compare img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:5px;cursor:zoom-in;background:var(--sunk)}
+.compare figcaption{font-size:.82rem;color:var(--ink2)}
+.medph{display:grid;grid-template-columns:minmax(140px,220px) minmax(0,1fr);gap:12px;padding:12px 0;border-top:1px solid var(--line);align-items:start}
+.medph:first-of-type{border-top:0}
+@media (max-width:520px){.medph{grid-template-columns:1fr}}
+.pedit{display:grid;grid-template-columns:84px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.pedit:first-child{border-top:0}
+#lb{width:min(1000px,calc(100vw - 24px));background:var(--surface)}
+#lb img{display:block;width:100%;max-height:calc(100dvh - 170px);object-fit:contain;background:var(--sunk)}
+.lbbar{display:flex;gap:8px;align-items:center;padding:10px 14px;flex-wrap:wrap}
+.lbbar p{margin:0;flex:1;min-width:0;font-size:.88rem;color:var(--ink2)}
+.upl{font-size:.8rem;color:var(--muted)}
+@media (prefers-reduced-motion:no-preference){.view{animation:fade .18s ease-out}@keyframes fade{from{opacity:.4;transform:translateY(3px)}to{opacity:1;transform:none}}}
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brandrow">
+      <div class="brand"><h1>Broiler Flock Ledger</h1><span class="cyc" id="cycName">Loading records</span></div>
+      <span class="spacer"></span>
+      <span class="sync" id="sync"><i></i><span>Connecting</span></span>
+      <button class="btn sm" id="exportBtn" type="button" hidden>Export to Excel</button>
+    </div>
+    <div>
+      <div class="ruler" id="ruler" aria-hidden="true"></div>
+      <div class="rulerlab" id="rulerlab"></div>
+    </div>
+    <nav class="tabs" id="tabs" aria-label="Sections"></nav>
+  </div>
+</header>
+<main class="wrap"><div id="view" class="view"><div class="empty">Loading the flock records…</div></div></main>
+<div id="tip" hidden></div>
+<input type="file" id="filePick" accept="image/*" multiple hidden>
+<dialog id="lb"><img id="lbImg" alt=""><div class="lbbar"><button class="btn sm" type="button" id="lbPrev">Previous</button><p id="lbCap"></p><button class="btn sm" type="button" id="lbNext">Next</button><button class="btn sm pri" type="button" id="lbClose">Close</button></div></dialog>
+<dialog id="dlg"><form method="dialog" id="dlgForm"><div class="mhead"><h3 id="dlgTitle"></h3></div><div class="mbody" id="dlgBody"></div><div class="mfoot" id="dlgFoot"></div></form></dialog>
+
+<script>
+(function(){
+"use strict";
+const DAY=86400000;
+const TABS=[["overview","Overview"],["daily","Daily log"],["growth","Growth & FCR"],["health","Health & medicine"],["feed","Feed"],["materials","Materials"],["expenses","Expenses"],["sales","Sales & buyers"],["money","Money"],["report","Investor report"],["photos","Photos"],["tasks","Checklist & to-dos"],["year","Year view"],["guide","Care guide"],["setup","Setup"]];
+const CHECK_ITEMS=[
+ ["water","Water full and clean in every drinker"],
+ ["feed","Feed available, not empty or spoiled"],
+ ["scan","Scan the group for 30 seconds: any isolated, weak or dead birds?"],
+ ["temp","Check temperature: huddling too tight or too spread out?"],
+ ["bedding","Bedding dry: a squeezed handful falls apart"],
+ ["smell","Walk-in smell test: no sharp ammonia smell"],
+ ["deaths","Any deaths logged in the Daily log"],
+ ["meds","Medicine or vitamins given today logged in Dosing"]
+];
+const S={setup:null,daily:{},feed:[],meds:[],doses:[],todos:[],cycles:[],checks:{},photos:[],materials:[],expenses:[],sales:[],buyers:[],weighins:[],vaccines:[],loaded:new Set()};
+let showAllDays=false;
+let assets=null, pending=null, modalDay=null, lbList=[], lbIdx=0;
+let db=null, canWrite=true, writeUnknown=false, downloads=null, tab=(location.hash||"").slice(1);
+if(!TABS.some(t=>t[0]===tab)) tab="overview";
+let dailyFilter={q:"",deathsOnly:false};
+let quick=null; // today's unsaved quick-log taps, kept across redraws
+let calc={litres:5,stage:"grower"};
+let scen=null;
+
+/* ---------- helpers ---------- */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
+const rwf=n=>(n<0?"−":"")+Math.round(Math.abs(n)).toLocaleString("en-US")+" RWF";
+const k=n=>Math.round(n).toLocaleString("en-US");
+const pct=(n,d=1)=>(n*100).toFixed(d)+"%";
+function parse(s){if(!s||typeof s!=="string")return null;const m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);return m?Date.UTC(+m[1],+m[2]-1,+m[3]):null}
+function iso(ms){const d=new Date(ms);return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0")}
+const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"],WD=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+function fd(ms,wd){if(ms==null)return"—";const d=new Date(ms);return (wd?WD[d.getUTCDay()]+" ":"")+d.getUTCDate()+" "+MON[d.getUTCMonth()]}
+function todayMs(){const n=new Date();return Date.UTC(n.getFullYear(),n.getMonth(),n.getDate())}
+const dayId=n=>"day-"+String(n).padStart(2,"0");
+function toast(msg){const t=document.createElement("div");t.className="toast";t.setAttribute("role","status");t.setAttribute("aria-live","polite");t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2600)}
+const blob=id=>window.__assetURL?window.__assetURL(id):"/_blob/"+encodeURIComponent(id);
+function photosFor(kind,key){return S.photos.filter(p=>p.kind===kind&&(kind==="day"?num(p.day)===key:kind==="med"?p.medId===key:kind==="material"?p.materialId===key:true)).sort((a,b)=>String(a.createdAt||"").localeCompare(String(b.createdAt||"")))}
+function thumbs(list,sm){return list.map(p=>`<button type="button" class="thumb ${sm?"sm":""}" data-view="${esc(p._id)}" title="${esc(p.caption||"")}"><img src="${blob(p.assetId)}" alt="${esc(p.caption||"Photo")}" loading="lazy"></button>`).join("")}
+function addBtn(kind,key,label){return canWrite&&assets?`<button type="button" class="addph" data-upload="${kind}" data-key="${esc(key??"")}">${label||"+ Add photo"}</button>`:""}
+async function shrink(file){
+  if(!/^image\/(jpeg|png|webp)$/.test(file.type))return file;
+  try{const bmp=await createImageBitmap(file,{imageOrientation:"from-image"});const sc=Math.min(1,1800/Math.max(bmp.width,bmp.height));if(sc===1&&file.size<1.5e6)return file;
+    const c=document.createElement("canvas");c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+    return await new Promise(r=>c.toBlob(b=>r(b||file),"image/jpeg",0.86))}catch(e){return file}
+}
+async function uploadFiles(files,target){
+  if(!assets){toast("Photo uploads are not available in this view.");return}
+  let ok=0;const total=files.length;const placed=[];
+  for(const f of files){
+    toast(`Uploading photo ${ok+1} of ${total}…`);
+    try{const b=await shrink(f);const r=await assets.upload(b,b.type?undefined:{type:"image/jpeg"});
+      const doc={assetId:r.id,kind:target.kind,caption:"",createdAt:new Date().toISOString()};
+      if(target.kind==="day"){const M=derive();let day=target.day;
+        if(!day){const lm=f.lastModified?new Date(f.lastModified):null;const fms=lm?Date.UTC(lm.getFullYear(),lm.getMonth(),lm.getDate()):null;
+          const n=fms!=null?Math.floor((fms-M.start)/DAY)+1:null;day=n>=1&&n<=M.cycleDays?n:Math.min(Math.max(M.dayNow||1,1),M.cycleDays);placed.push(day)}
+        doc.day=day;doc.date=iso(M.start+(day-1)*DAY)}
+      if(target.kind==="material"){doc.materialId=target.materialId;const m=S.materials.find(x=>x._id===target.materialId);doc.materialName=m?m.name:""}
+      if(target.kind==="med"){doc.medId=target.medId;const m=S.meds.find(x=>x._id===target.medId);doc.medName=m?m.name:""}
+      await db.collection("photos").add(doc);ok++;
+    }catch(e){const c=e&&e.code;toast(c==="unsupported_type"?"That photo format is not supported. Use JPG or PNG (on iPhone: Settings, Camera, Formats, Most Compatible).":c==="too_large"?"That photo is too large (20 MB limit).":c==="quota_exceeded"?"Photo storage is full. Delete some photos first.":"A photo could not be uploaded. Try again.");}
+  }
+  if(ok){const u=[...new Set(placed)].sort((a,b)=>a-b);toast((ok===1?"Photo added":ok+" photos added")+(u.length?` to day ${u.join(", ")} by the date taken. Open a day to move a photo.`:""))}
+}
+function openLB(list,i){lbList=list;lbIdx=i;showLB();const d=$("#lb");if(!d.open)d.showModal()}
+function showLB(){const p=lbList[lbIdx];if(!p)return;$("#lbImg").src=blob(p.assetId);$("#lbImg").alt=p.caption||"Photo";
+  const where=p.kind==="day"?`Day ${p.day}${p.date?" · "+fd(parse(p.date),1):""}`:p.kind==="med"?(p.medName||"Medicine"):p.kind==="material"?(p.materialName||"Material"):"Other";
+  $("#lbCap").textContent=where+(p.caption?" — "+p.caption:"")+`  (${lbIdx+1} of ${lbList.length})`;
+  $("#lbPrev").disabled=lbIdx===0;$("#lbNext").disabled=lbIdx===lbList.length-1}
+function setSync(state,text){const el=$("#sync");el.className="sync "+state;el.lastElementChild.textContent=text}
+
+/* ---------- derived numbers ---------- */
+function derive(){
+  const st=S.setup||{};
+  const start=parse(st.startDate);
+  const cycleDays=num(st.cycleDays)||45;
+  const today=todayMs();
+  const dayNow=start!=null?Math.floor((today-start)/DAY)+1:null;
+  const saleMs=start!=null?start+(cycleDays-1)*DAY:null;
+  const chicks=num(st.chicks), bonus=num(st.bonusChicks), flock=chicks+bonus;
+  const days=[];let alive=flock,deaths=0,lastLogged=0;
+  for(let d=1;d<=cycleDays;d++){
+    const r=S.daily[dayId(d)]||null;
+    const dd=r?num(r.deaths):0;
+    const startAlive=alive; alive-=dd; deaths+=dd;
+    const text=dayText(r);
+    if(r&&(text||dd))lastLogged=d;
+    days.push({day:d,date:start!=null?start+(d-1)*DAY:null,rec:r,deaths:dd,startAlive,endAlive:alive,text});
+  }
+  const mortality=flock?deaths/flock:0;
+  const feedKg=S.feed.reduce((a,f)=>a+num(f.bags)*num(f.kgPerBag),0);
+  const feedCost=S.feed.reduce((a,f)=>a+num(f.bags)*num(f.costPerBag),0);
+  const medCost=S.meds.reduce((a,m)=>a+num(m.cost),0);
+  const chickCost=chicks*num(st.pricePerChick);
+  const other=num(st.otherCosts), coop=num(st.coopShare);
+  const expTotal=S.expenses.reduce((a,e)=>a+num(e.amount),0);
+  const totalCost=chickCost+feedCost+medCost+other+coop+expTotal;
+  const weight=num(st.actualWeight)||num(st.targetWeight);
+  const price=num(st.salePrice);
+  const soldBirds=S.sales.reduce((a,s)=>a+num(s.birds),0), soldKg=S.sales.reduce((a,s)=>a+num(s.kg),0);
+  const salesAmt=S.sales.reduce((a,s)=>a+saleAmt(s),0), salesPaid=S.sales.reduce((a,s)=>a+num(s.paid),0), owed=Math.max(0,salesAmt-salesPaid);
+  const onHand=Math.max(0,alive-soldBirds);
+  const revenue=salesAmt+onHand*weight*price;
+  const profit=revenue-totalCost;
+  const startKg=flock*0.044;
+  const feedBy=ms=>S.feed.filter(f=>{const d=parse(f.date);return d==null||ms==null||d<=ms}).reduce((a,f)=>a+num(f.bags)*num(f.kgPerBag),0);
+  const soldBy=ms=>S.sales.filter(x=>{const d=parse(x.date);return d!=null&&d<=ms});
+  const weighins=S.weighins.map(w=>{const dms=parse(w.date);const day=start!=null&&dms!=null?Math.round((dms-start)/DAY)+1:num(w.day);const avg=num(w.birds)?num(w.totalKg)/num(w.birds):0;
+    let fcr=null;if(w.feedLeftKg!=null&&w.feedLeftKg!==""&&avg){const sb=soldBy(dms);const sk=sb.reduce((a,x)=>a+num(x.kg),0),sn=sb.reduce((a,x)=>a+num(x.birds),0);
+      const aliveThen=days[Math.min(Math.max(day,1),cycleDays)-1]?.endAlive??alive;const live=Math.max(0,aliveThen-sn)*avg+sk;const used=feedBy(dms)-num(w.feedLeftKg);const gain=live-startKg;fcr=gain>0&&used>0?used/gain:null}
+    return {...w,day,avg,fcr}}).filter(w=>w.avg>0).sort((a,b)=>a.day-b.day);
+  let fcr=null,fcrFinal=false,liveKg=null;
+  if(onHand===0&&soldBirds>0){const used=feedKg-num(st.feedLeftKg);const gain=soldKg-startKg;if(gain>0)fcr=used/gain;fcrFinal=true;liveKg=soldKg}
+  else{const lw=[...weighins].reverse().find(w=>w.fcr);if(lw)fcr=lw.fcr;const l=weighins[weighins.length-1];if(l)liveKg=onHand*l.avg+soldKg}
+  const costPerKg=liveKg?totalCost/liveKg:null;
+  const ageNow=Math.min(dayNow??cycleDays,cycleDays);
+  const avgNow=soldBirds&&onHand===0?soldKg/soldBirds:(weighins.length?weighins[weighins.length-1].avg:null);
+  const epef=fcr&&avgNow?((1-mortality)*100*avgNow)/(ageNow*fcr)*100:null;
+  const vax=[...S.vaccines].sort((a,b)=>num(a.day)-num(b.day));
+  const medByName={};S.meds.forEach(m=>{medByName[(m.name||"").trim().toLowerCase()]=m});
+  const doses=S.doses.map(d=>{
+    const m=medByName[(d.product||"").trim().toLowerCase()]||null;
+    const s=parse(d.start), e=parse(d.end);
+    const wd=m?num(m.withdrawal):null;
+    const daysGiven=s!=null&&e!=null?Math.round((e-s)/DAY)+1:null;
+    const safe=e!=null&&wd>0?e+wd*DAY:null;
+    return {...d,med:m,s,e,wd,daysGiven,total:daysGiven!=null?daysGiven*num(d.timesPerDay||1):null,safe,anti:m&&/antibiotic/i.test(m.type||"")};
+  }).sort((a,b)=>(a.s??0)-(b.s??0));
+  let latestSafe=null;doses.forEach(d=>{if(d.safe!=null&&(latestSafe==null||d.safe>latestSafe))latestSafe=d.safe});
+  const ongoing=doses.filter(d=>d.s!=null&&d.e==null&&d.anti);
+  const matCost=m=>num(m.qty||1)*num(m.unitCost);
+  const matSpent=S.materials.reduce((a,m)=>a+matCost(m),0);
+  const matCycle=S.materials.reduce((a,m)=>a+(m.kind==="Reusable"?matCost(m)/Math.max(1,num(m.cycles)||1):matCost(m)),0);
+  const shopping=S.materials.filter(m=>m.status==="Need to buy"||m.status==="Running low"||m.status==="Broken or worn out");
+  const activeToday=doses.filter(d=>d.s!=null&&d.s<=today&&(d.e==null||d.e>=today));
+  return {expTotal,soldBirds,soldKg,salesAmt,salesPaid,owed,onHand,weighins,fcr,fcrFinal,costPerKg,epef,vax,matSpent,matCycle,shopping,matCost,st,start,cycleDays,today,dayNow,saleMs,chicks,bonus,flock,days,alive,deaths,mortality,lastLogged,feedKg,feedCost,medCost,chickCost,other,coop,totalCost,weight,price,revenue,profit,doses,latestSafe,ongoing,activeToday,medByName};
+}
+function mortStatus(m){if(m<=0.02)return["good","On the 2% goal"];if(m<=0.05)return["neutral","Normal range (1–5%)"];if(m<=0.10)return["warn","Beginner range (5–10%)"];return["crit","Above 10%"]}
+
+function alerts(M){
+  const out=[];
+  if(!S.setup){out.push(["info","No setup yet","Open Setup and enter the start date and chick numbers."]);return out}
+  if(M.latestSafe!=null&&M.saleMs!=null&&M.latestSafe>M.saleMs) out.push(["crit","Medicine withdrawal runs past the sale date",`The last medicine is not cleared until ${fd(M.latestSafe,1)}, after the planned sale on ${fd(M.saleMs,1)}. Delay the sale or stop the course earlier.`]);
+  M.ongoing.forEach(d=>out.push(["warn",`${d.product} has no last day entered`,`Add the last day in the Dosing log so the safe-to-sell date can be worked out.`]));
+  // interactions
+  const seen=new Set(), pairs={};
+  for(let i=0;i<M.doses.length;i++)for(let j=0;j<M.doses.length;j++){
+    if(i===j)continue;const a=M.doses[i],b=M.doses[j];
+    if(a.s==null||b.s==null)continue;
+    const ae=a.e??M.today, be=b.e??M.today;
+    if(a.s>be||b.s>ae)continue;
+    const os=Math.max(a.s,b.s), oe=Math.min(ae,be);
+    const avoid=String(a.med?.avoidWith||"").split(",").map(x=>x.trim().toLowerCase()).filter(Boolean);
+    const bn=(b.product||"").trim().toLowerCase();
+    if(avoid.includes(bn)){
+      const key=a.product+"|"+b.product;
+      if(!pairs[key])pairs[key]={a:a.product,b:b.product,r:[]};
+      const rr=fd(os)+" to "+fd(oe);if(!pairs[key].r.includes(rr))pairs[key].r.push(rr);
+    }
+    if(i<j&&a.anti&&b.anti&&a.product!==b.product){
+      const key="aa|"+os;
+      if(!seen.has(key)){seen.add(key);out.push(["warn","Two antibiotics overlapped",`${a.product} and ${b.product} were both given ${fd(os)} to ${fd(oe)}. Ask a vet before combining antibiotics again.`])}
+    }
+  }
+  Object.values(pairs).forEach(p=>out.push(["warn",`${p.a} was given together with ${p.b}`,`${p.r.join("; ")}. The label says ${p.b} can stop ${p.a} from working. Pause it during the next course.`]));
+  const [ms]=mortStatus(M.mortality);
+  if(ms==="warn"||ms==="crit") out.push([ms,`Death rate is ${pct(M.mortality)}`,`${M.deaths} of ${M.flock} birds lost. Each bird is worth about ${rwf(M.weight*M.price)} at sale.`]);
+  if(M.dayNow!=null&&M.dayNow>=1&&M.dayNow<=M.cycleDays){
+    const missing=[];for(let d=1;d<=Math.min(M.dayNow,M.cycleDays);d++){if(!S.daily[dayId(d)]?.notes)missing.push(d)}
+    if(missing.length) out.push(["info",missing.length===1?`Day ${missing[0]} has no notes yet`:`${missing.length} days have no notes`,missing.length<=6?`Days ${missing.join(", ")}. Write one or two lines, good days too.`:`Earliest: day ${missing[0]}. Write one or two lines, good days too.`]);
+    const c=S.checks[iso(M.today)]?.items||{};const done=CHECK_ITEMS.filter(x=>c[x[0]]).length;
+    if(done<CHECK_ITEMS.length) out.push(["info",`Today's checklist: ${done} of ${CHECK_ITEMS.length} done`,"Open Checklist & to-dos to tick them off."]);
+    const left=M.cycleDays-M.dayNow;
+    if(left<=7&&left>=0) out.push(["info",`${left} day${left===1?"":"s"} to the planned sale`,"Line up buyers, state your price first, and do not sell swollen or sick birds."]);
+  }
+  M.vax.filter(v=>(v.status||"Planned")==="Planned"&&M.dayNow!=null&&num(v.day)<=M.dayNow+1).forEach(v=>{const d=num(v.day);out.push([d<M.dayNow?"warn":"info",d<M.dayNow?`Vaccination overdue: ${v.disease}`:d===M.dayNow?`Vaccinate today: ${v.disease}`:`Vaccinate tomorrow: ${v.disease}`,`${v.vaccine||""} · ${v.route||""} · planned for day ${d}. Mark it given in Health & medicine.`])});
+  if(M.owed>0)out.push(["warn",`${rwf(M.owed)} still owed by buyers`,"See Sales & buyers."]);
+  if(M.dayNow!=null&&M.dayNow>=7&&M.dayNow<=M.cycleDays&&M.onHand>0){const lw=M.weighins[M.weighins.length-1];if(!lw||M.dayNow-lw.day>=7)out.push(["info",lw?`Last weigh-in was ${M.dayNow-lw.day} days ago`:"No weigh-in yet","Weigh 5–10 birds and note the feed left in store. See Growth & FCR."])}
+  if(M.shopping.length)out.push(["info",`Shopping list: ${M.shopping.length} item${M.shopping.length===1?"":"s"}`,M.shopping.map(m=>m.name).join(", ")+". See Materials."]);
+  S.todos.filter(t=>!t.done&&parse(t.date)!=null&&parse(t.date)<M.today).forEach(t=>out.push(["info",`Overdue: ${t.text}`,`Was due ${fd(parse(t.date),1)}.`]));
+  const big=M.days.filter(d=>d.deaths>=2);if(big.length)out.push(["warn",`More than one death on day ${big.map(d=>d.day).join(", ")}`,"Two or more deaths in a day is the point to call a vet or the RAB office."]);
+  const order={crit:0,warn:1,info:2,good:3};out.sort((a,b)=>order[a[0]]-order[b[0]]);
+  return out;
+}
+
+/* ---------- chrome ---------- */
+function renderTop(M){
+  $("#cycName").textContent=S.setup?`${S.setup.cycleName||"Cycle"} · started ${fd(M.start,1)}`:"No setup yet";
+  const r=$("#ruler"),lab=$("#rulerlab");
+  let h="";for(const d of M.days){let c=[];if(M.dayNow!=null&&d.day<M.dayNow)c.push("past");if(d.day===M.dayNow)c.push("today");if(d.deaths)c.push("death");if(d.day%7===1&&d.day>1)c.push("wk");if(d.day===M.cycleDays)c.push("sale");h+=`<span class="${c.join(" ")}"></span>`}
+  r.innerHTML=h;r.style.gridTemplateColumns=`repeat(${M.cycleDays},1fr)`;
+  lab.innerHTML=M.start!=null?`<span>Day 1 · ${fd(M.start)}</span><span>${M.dayNow!=null&&M.dayNow>=1&&M.dayNow<=M.cycleDays?"Today · day "+M.dayNow:""}</span><span>Sale · day ${M.cycleDays} · ${fd(M.saleMs)}</span>`:"";
+  $("#tabs").innerHTML=TABS.map(([id,l])=>`<button type="button" data-tab="${id}" ${id===tab?'aria-current="page"':""}>${l}</button>`).join("");
+}
+
+/* ---------- chart toolkit ---------- */
+// Small inline sparkline: line + faint area, fills its box width (non-scaling stroke keeps 2px).
+function spark(vals,color,fill){
+  color=color||"var(--accent)";
+  const n=vals.length,w=160,h=44,p=4;
+  if(n<2)return `<div class="muted" style="font-size:.76rem;padding:12px 0">Not enough data yet</div>`;
+  const lo=Math.min(...vals),hi=Math.max(...vals),rng=(hi-lo)||1;
+  const X=i=>p+i/(n-1)*(w-2*p),Y=v=>p+(1-(v-lo)/rng)*(h-2*p);
+  let d="";vals.forEach((v,i)=>d+=(i?"L":"M")+X(i).toFixed(1)+","+Y(v).toFixed(1));
+  const ar=fill!==false?`<path d="${d}L${X(n-1).toFixed(1)},${h-p} L${p},${h-p} Z" fill="${color}" opacity=".13"/>`:"";
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">${ar}<path class="ln" d="${d}" stroke="${color}" vector-effect="non-scaling-stroke"/></svg>`;
+}
+// A reusable crosshair group markup for line charts (hidden until hover drives it).
+function xhairG(top,bottom,series){return `<g class="xhair" visibility="hidden"><line x1="0" x2="0" y1="${top}" y2="${bottom}"/>${Array.from({length:series},(_,i)=>`<circle class="focus s${i+1}" r="4.2" visibility="hidden"/>`).join("")}</g>`}
+// Donut chart: segments [{label,value,color}] with a centred total and hover tooltips.
+function donut(segs,centerBig,centerSub){
+  segs=segs.filter(s=>s.value>0);const total=segs.reduce((a,s)=>a+s.value,0)||1;
+  const pc=f=>f>0&&f<0.005?"<1%":pct(f,0);
+  const cx=66,cy=66,R=58,r=37;let a0=-Math.PI/2;
+  const P=(ang,rad)=>[cx+rad*Math.cos(ang),cy+rad*Math.sin(ang)];
+  const arcs=segs.map(s=>{const frac=s.value/total;let a1=a0+frac*2*Math.PI;
+    const big=frac>0.5?1:0;
+    const [x0,y0]=P(a0,R),[x1,y1]=P(frac>=0.9999?a1-1e-4:a1,R),[x2,y2]=P(frac>=0.9999?a1-1e-4:a1,r),[x3,y3]=P(a0,r);
+    const d=`M${x0.toFixed(2)},${y0.toFixed(2)} A${R},${R} 0 ${big} 1 ${x1.toFixed(2)},${y1.toFixed(2)} L${x2.toFixed(2)},${y2.toFixed(2)} A${r},${r} 0 ${big} 0 ${x3.toFixed(2)},${y3.toFixed(2)} Z`;
+    a0=a1;
+    return `<path d="${d}" fill="${s.color}" stroke="var(--surface)" stroke-width="1.5" data-tip="${esc(`<b>${s.label}</b><br>${tk(pc(frac)+" of cost",k(s.value)+" RWF")}`)}"/>`;
+  }).join("");
+  const legend=segs.map(s=>`<span><i class="sq" style="background:${s.color}"></i>${esc(s.label)} <b class="mono" style="color:var(--ink)">${pc(s.value/total)}</b></span>`).join("");
+  return `<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+    <svg viewBox="0 0 132 132" style="width:132px;height:132px;flex:none" role="img" aria-label="Cost breakdown">${arcs}<text x="66" y="62" text-anchor="middle" style="fill:var(--ink);font:700 18px var(--f-mono)">${centerBig}</text><text x="66" y="78" text-anchor="middle" style="fill:var(--muted);font:11px var(--f-body)">${centerSub}</text></svg>
+    <div class="legend" style="flex-direction:column;gap:7px;margin-top:0;flex:1;min-width:120px">${legend}</div></div>`;
+}
+const COSTCOL={Feed:"var(--accent)",Chicks:"var(--info)","Medicine & vitamins":"var(--supp)","Coop & equipment":"var(--ink2)",Other:"var(--warn)",Expenses:"var(--crit)","Medicine and vitamins":"var(--supp)","Materials and equipment share":"var(--ink2)","Other costs":"var(--warn)"};
+// A small chick emblem for the report header — generic branding, never an investor's name.
+function brandMark(){return `<svg class="brandico" viewBox="0 0 46 46" role="img" aria-label="Farm mark"><rect width="46" height="46" rx="11" fill="var(--accent-soft)"/><g fill="var(--accent)"><circle cx="26" cy="26" r="9.5"/><circle cx="17.5" cy="17.5" r="6"/><path d="M12 17 L6.5 18.8 L12 20.6 Z"/></g><circle cx="16.3" cy="16.6" r="1.4" fill="var(--surface)"/><g stroke="var(--accent)" stroke-width="1.7" stroke-linecap="round"><line x1="23" y1="35" x2="23" y2="39.5"/><line x1="29" y1="35" x2="29" y2="39.5"/></g></svg>`}
+// Best tab to jump to for a given alert title (for the "Do next" shortcuts).
+function alertTab(t){t=(t||"").toLowerCase();
+  if(/checklist|^overdue:/.test(t))return"tasks";
+  if(/weigh-in/.test(t))return"growth";
+  if(/shopping/.test(t))return"materials";
+  if(/owed|planned sale|sell/.test(t))return"sales";
+  if(/no notes|has no notes/.test(t))return"daily";
+  if(/death rate|death on day/.test(t))return"daily";
+  if(/antibiotic|enrosol|withdrawal|vaccinat|no last day|given together|medicine/.test(t))return"health";
+  return"overview";
+}
+// Tooltip helper: a muted label + value row.
+const tk=(label,val)=>`<span class="tipk">${label}</span> ${val}`;
+let activeXhair=null;
+function hideXhair(){if(activeXhair){activeXhair.setAttribute("visibility","hidden");activeXhair=null}}
+
+/* ---------- views ---------- */
+function vOverview(M){
+  if(!S.setup)return emptyState();
+  const [ms,ml]=mortStatus(M.mortality);
+  const al=alerts(M);
+  const left=M.dayNow!=null?M.cycleDays-M.dayNow:null;
+  const cut=Math.min(Math.max(M.dayNow??0,0),M.cycleDays);
+  const recent=M.days.filter(d=>d.text).slice(-3).reverse();
+  const costs=[["Feed",M.feedCost],["Chicks",M.chickCost],["Medicine & vitamins",M.medCost],["Coop & equipment",M.coop],["Other",M.other]];
+  // this week
+  const wk=cut>=1?Math.ceil(cut/7):0;
+  const wkDays=M.days.filter(d=>Math.ceil(d.day/7)===wk&&d.day<=cut);
+  const wkDeaths=wkDays.reduce((a,d)=>a+d.deaths,0);
+  const wkNotes=wkDays.filter(d=>d.text).length;
+  const temps=wkDays.map(d=>d.rec&&d.rec.temp).filter(v=>v!=null&&v!=="").map(Number);
+  const wkTemp=temps.length?temps.reduce((a,b)=>a+b,0)/temps.length:null;
+  const tgtTemp=weekTemp(wk);
+  // trend sparklines
+  const aliveSeries=M.days.filter(d=>d.day<=cut).map(d=>d.endAlive);
+  const fcrSeries=M.weighins.map(w=>w.fcr).filter(v=>v!=null);
+  const spendBy=new Array(M.cycleDays+2).fill(0);
+  const dayOf=ms2=>{const dm=parse(ms2);const dd=dm!=null&&M.start!=null?Math.floor((dm-M.start)/DAY)+1:1;return Math.min(Math.max(dd,1),M.cycleDays)};
+  spendBy[1]+=M.chickCost+M.coop+M.other;
+  S.feed.forEach(f=>spendBy[dayOf(f.date)]+=num(f.bags)*num(f.costPerBag));
+  S.meds.forEach(m=>spendBy[dayOf(m.dateBought)]+=num(m.cost));
+  S.expenses.forEach(e=>spendBy[dayOf(e.date)]+=num(e.amount));
+  let run=0;const costSeries=[];for(let d=1;d<=Math.max(cut,1);d++){run+=spendBy[d];costSeries.push(run)}
+  const donext=al.slice(0,3),rest=al.slice(3);
+  const lab={crit:"Critical",warn:"Check",info:"To do",good:"Good"};
+  return `
+  <div class="hero">
+    <div><div class="eyebrow">Cycle progress</div><div class="big">Day ${M.dayNow??"—"}<small> of ${M.cycleDays}</small></div>
+      <div class="sub">${left!=null&&left>=0?`${left} days to the planned sale on <b>${fd(M.saleMs,1)}</b>`:left!=null?`Planned sale was ${fd(M.saleMs,1)}`:""}</div></div>
+    <div><div class="eyebrow">Birds on the farm</div><div class="mid">${M.onHand} <span class="muted" style="font-size:1rem">/ ${M.flock}</span></div><div class="sub">${M.soldBirds?`${M.soldBirds} sold · `:""}${M.deaths} lost · <span class="chip ${ms}">${pct(M.mortality)} · ${ml}</span></div></div>
+    <div><div class="eyebrow">Safe to sell after</div><div class="mid">${M.latestSafe!=null?fd(M.latestSafe):"No wait"}</div><div class="sub">${M.latestSafe!=null&&M.saleMs!=null?(M.latestSafe>M.saleMs?'<span class="chip crit">Conflicts with sale date</span>':'<span class="chip good">Clears before sale</span>'):"No medicine withdrawal logged"}</div></div>
+    <div><div class="eyebrow">Projected profit</div><div class="mid">${k(M.profit)}</div><div class="sub">RWF at ${M.weight} kg × ${k(M.price)} RWF/kg</div></div>
+  </div>
+  ${wk?`<div class="week">
+    <div><div class="eyebrow">This week · week ${wk}</div><div class="wn">${wkDays.length} day${wkDays.length===1?"":"s"} logged</div><div class="wl">days ${(wk-1)*7+1}–${Math.min(wk*7,M.cycleDays)}</div></div>
+    <div><div class="wn ${wkDeaths?"dz":""}">${wkDeaths}</div><div class="wl">death${wkDeaths===1?"":"s"} this week</div></div>
+    <div><div class="wn">${wkNotes}<span class="muted" style="font-size:.9rem">/${wkDays.length}</span></div><div class="wl">days with notes</div></div>
+    <div><div class="wn">${wkTemp!=null?wkTemp.toFixed(1)+" °C":"—"}</div><div class="wl">avg room heat${tgtTemp?` · aim ${tgtTemp}`:""}</div></div>
+    <div><div class="wn">${left!=null&&left>=0?left:"—"}</div><div class="wl">days to sale</div></div>
+  </div>`:""}
+  <div class="trend">
+    <div><div class="eyebrow">Birds on the farm</div><div class="tval">${M.onHand}<small> / ${M.flock}</small></div>${spark(aliveSeries,"var(--ink)")}<div class="tsub">${M.soldBirds?`${M.soldBirds} sold · `:""}${pct(M.mortality)} lost so far</div></div>
+    <div><div class="eyebrow">Feed conversion</div><div class="tval">${M.fcr!=null?M.fcr.toFixed(2):"—"}</div>${fcrSeries.length>=2?spark(fcrSeries,"var(--supp)",false):`<div class="muted" style="font-size:.76rem;padding:12px 0">Add weigh-ins to track FCR</div>`}<div class="tsub">kg feed per kg gained · lower is better</div></div>
+    <div><div class="eyebrow">Money spent</div><div class="tval">${k(M.totalCost)}<small> RWF</small></div>${spark(costSeries,"var(--accent)")}<div class="tsub">feed is ${M.totalCost?pct(M.feedCost/M.totalCost,0):"—"} of cost</div></div>
+  </div>
+  <div class="grid2">
+    <section class="panel"><h3>Needs attention <span class="chip neutral">${al.length}</span></h3>
+      ${al.length?`<div class="eyebrow" style="margin-bottom:2px">Do next</div><div class="donext">${donext.map(([s,t,p],i)=>`<button type="button" class="dnx" data-go="${alertTab(t)}"><span class="num">${i+1}</span><b>${esc(t)} <span class="chip ${s}" style="vertical-align:middle">${lab[s]}</span></b><span class="go">›</span><p>${esc(p)}</p></button>`).join("")}</div>
+      ${rest.length?`<div class="eyebrow" style="margin:16px 0 2px">Also on the list</div><div class="alerts">${rest.map(([s,t,p])=>`<div class="alert"><span class="chip ${s}">${lab[s]}</span><b>${esc(t)}</b><p>${esc(p)}</p></div>`).join("")}</div>`:""}`:`<p class="muted">Nothing needs attention. Keep logging each day.</p>`}
+    </section>
+    <section class="panel"><h3>Birds alive by day<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:.8rem">dashed lines are death-rate marks</span></h3>${flockChart(M)}</section>
+  </div>
+  <div class="grid3">
+    <section class="panel"><h3>Where the money went</h3>
+      ${donut(costs.map(([l,v])=>({label:l,value:v,color:COSTCOL[l]||"var(--muted)"})),k(Math.round(M.totalCost/1000))+"k",M.totalCost>=1000?"RWF total":"RWF")}
+      <div class="kv" style="margin-top:12px"><div class="em">Total cost</div><div class="em">${rwf(M.totalCost)}</div><div>Feed share of cost</div><div>${M.totalCost?pct(M.feedCost/M.totalCost,0):"—"}</div></div>
+    </section>
+    <section class="panel"><h3>Given today</h3>
+      ${M.activeToday.length?M.activeToday.map(d=>`<div class="alert"><span class="badge-type"><i style="background:var(${d.anti?"--anti":"--supp"})"></i>${d.anti?"Antibiotic":"Supplement"}</span><b>${esc(d.product)}</b><p>${d.e!=null?"Until "+fd(d.e,1):"No last day set"}${d.wd?` · ${d.wd}-day wait before sale`:""}</p></div>`).join(""):`<p class="muted">Nothing is logged as given today.</p>`}
+    </section>
+    <section class="panel"><h3>Latest notes<span class="spacer"></span><button class="btn sm" data-go="daily" type="button">Daily log</button></h3>
+      ${recent.length?recent.map(d=>`<div class="alert"><span class="mono muted">Day ${d.day}</span><b>${fd(d.date,1)}${d.deaths?` · <span class="dz">${d.deaths} died</span>`:""}</b><p>${esc(d.text)}</p></div>`).join(""):`<p class="muted">No notes yet.</p>`}
+    </section>
+  </div>`;
+}
+
+function flockChart(M){
+  const W=640,H=250,L=40,R=58,T=16,B=30;
+  const lo=Math.floor(M.flock*0.86),hi=M.flock;
+  const x=d=>L+(d-1)/(M.cycleDays-1)*(W-L-R);
+  const y=v=>T+(hi-v)/(hi-lo)*(H-T-B);
+  const base=H-B;
+  const cut=Math.min(M.dayNow??0,M.cycleDays);
+  let path="",proj="",lastX=null,lastV=null;
+  M.days.forEach(d=>{if(d.day<=cut){const x0=x(d.day),x1=x(Math.min(d.day+1,M.cycleDays));
+    path+=(path?"L":"M")+x0.toFixed(1)+","+y(d.startAlive).toFixed(1)+"H"+x1.toFixed(1)+"V"+y(d.endAlive).toFixed(1);lastX=x1;lastV=d.endAlive}});
+  const area=path?`${path}L${lastX.toFixed(1)},${base} L${x(1).toFixed(1)},${base} Z`:"";
+  if(cut>=1&&cut<M.cycleDays){const v=M.days[cut-1].endAlive;proj=`M${lastX.toFixed(1)},${y(v).toFixed(1)}H${x(M.cycleDays).toFixed(1)}`}
+  const refs=[[0.02,"2% goal"],[0.05,"5%"],[0.10,"10%"]].map(([p,l])=>{const v=M.flock*(1-p);return v<lo?"":`<line class="ref" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${W-R+7}" y="${y(v)+3.5}">${l}</text>`}).join("");
+  let yt="";for(let v=hi;v>=lo;v-=Math.max(1,Math.round((hi-lo)/4))){yt+=`<line class="gridln soft" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-8}" y="${y(v)+3.5}" text-anchor="end">${v}</text>`}
+  let xt="";[1,8,15,22,29,36,M.cycleDays].forEach(d=>{xt+=`<text x="${x(d)}" y="${H-10}" text-anchor="middle">${d}</text>`});
+  const dots=M.days.filter(d=>d.deaths&&d.day<=cut).map(d=>`<circle class="dot" cx="${x(d.day)}" cy="${y(d.endAlive)}" r="4"/>`).join("");
+  const today=cut>=1&&cut<=M.cycleDays?`<line class="todayln" x1="${x(cut)}" x2="${x(cut)}" y1="${T}" y2="${base}"/>`:"";
+  const now=lastX!=null?`<circle cx="${x(cut).toFixed(1)}" cy="${y(lastV).toFixed(1)}" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/><rect class="tag" x="${(x(cut)-14).toFixed(1)}" y="${(y(lastV)-24).toFixed(1)}" width="28" height="16" rx="3"/><text class="tagt" x="${x(cut).toFixed(1)}" y="${(y(lastV)-12).toFixed(1)}" text-anchor="middle">${lastV}</text>`:"";
+  const step=(W-L-R)/(M.cycleDays-1);
+  const hits=M.days.map(d=>{const reached=d.day<=cut;return `<rect class="hit" x="${(x(d.day)-step/2).toFixed(1)}" y="${T}" width="${step.toFixed(1)}" height="${base-T}" data-cx="${x(d.day).toFixed(1)}" ${reached?`data-cy="${y(d.endAlive).toFixed(1)}"`:""} data-tip="${esc(`<b>Day ${d.day}</b> · ${fd(d.date,1)}<br>`+(reached?`${tk("Alive",d.endAlive)}${d.deaths?` · <b style="color:var(--crit)">${d.deaths} died</b>`:""}${d.text?`<br>${esc(d.text.slice(0,140))}${d.text.length>140?"…":""}`:""}`:"Not reached yet"))}"/>`}).join("");
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Birds alive by day of the cycle"><defs><linearGradient id="gFlock" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--ink)" stop-opacity=".15"/><stop offset="1" stop-color="var(--ink)" stop-opacity="0"/></linearGradient></defs>${yt}${refs}<path class="band" d="${area}" fill="url(#gFlock)"/><path class="proj" d="${proj}"/><path class="series" d="${path}"/>${today}${dots}${now}<line class="axis" x1="${L}" x2="${W-R}" y1="${base}" y2="${base}"/>${xt}<text x="${L}" y="${H-0}" class="lab" style="font-size:10px">day of cycle</text>${xhairG(T,base,1)}${hits}</svg>
+  <div class="legend"><span><i class="line" style="background:var(--ink)"></i>Birds alive</span><span><i class="round" style="background:var(--crit)"></i>A death</span><span><i class="line" style="background:var(--accent)"></i>Today</span><span><i class="dash"></i>If no more deaths</span></div>`;
+}
+
+function weekTemp(w){return ["32–35 °C","about 30–32 °C","about 27–29 °C","about 24–26 °C","about 21–24 °C","about 21–24 °C","about 21–24 °C"][w-1]||""}
+function vDaily(M){
+  if(!S.setup)return emptyState();
+  const td=M.dayNow>=1&&M.dayNow<=M.cycleDays?M.dayNow:null;
+  const saved=td?S.daily[dayId(td)]||null:null;
+  const cur=td&&quick&&quick.day===td?quick:(saved||{});
+  const prev=td>1?S.daily[dayId(td-1)]||null:null;
+  const qd=num(cur.deaths);
+  const q=dailyFilter.q.trim().toLowerCase();
+  let rows="";let wk=0;
+  for(const d of M.days){
+    const w=Math.ceil(d.day/7);
+    if(!q&&!dailyFilter.deathsOnly&&w!==wk){wk=w;rows+=`<tr class="wkrow"><td colspan="6">WEEK ${w} · days ${(w-1)*7+1}–${Math.min(w*7,M.cycleDays)} · room heat guide ${weekTemp(w)}</td></tr>`}
+    if(dailyFilter.deathsOnly&&!d.deaths)continue;
+    if(q&&!d.text.toLowerCase().includes(q))continue;
+    const fut=M.dayNow!=null&&d.day>M.dayNow;
+    rows+=`<tr class="${canWrite?"click ":""}${fut?"future ":""}${d.day===td?"todayrow":""}" data-day="${d.day}"><td class="mono">${fd(d.date,1)}</td><td class="n">${d.day}</td><td class="n">${fut&&!d.rec?"":d.startAlive}</td><td class="n ${d.deaths?"dz":""}">${fut&&!d.rec?"":d.deaths}</td><td class="n">${fut&&!d.rec?"":d.endAlive}</td><td class="note">${(()=>{const ph=photosFor("day",d.day);return ph.length?`<div class="thumbs" style="margin-bottom:6px">${thumbs(ph.slice(0,4),1)}</div>`:""})()}${condLine(d.rec)}${esc(d.rec?.notes||"")}</td></tr>`;
+  }
+  const causes={};M.days.forEach(d=>{if(d.deaths){const c=d.rec?.cause||"Not recorded";causes[c]=(causes[c]||0)+d.deaths}});
+  return `
+  <div class="vhead"><div><h2>Daily log</h2><p>One row per day of the cycle. Birds alive carries forward from the setup automatically. ${canWrite?"Tap a row to edit it.":""}</p></div></div>
+  ${td&&canWrite?`<section class="panel" id="quickLog"><h3>Log today · day ${td} · ${fd(M.today,1)}<span class="spacer"></span>${quick&&quick.day===td?`<span class="chip warn">Not saved yet</span>`:saved?`<span class="chip good">Saved</span>`:""}</h3>
+    <p class="muted" style="margin:-4px 0 12px;font-size:.84rem">Tap what you see. Notes are only for anything extra.</p>
+    ${prev&&(dayObs(prev).length||prev.litter||prev.smell||prev.temp!=null)?`<button class="btn sm" type="button" data-act="sameAsYesterday" style="margin-bottom:6px">Same as yesterday</button>`:""}
+    <div class="fgrid"><div class="field"><label>Deaths today</label><div class="stepper"><button type="button" data-step="-1" aria-label="One fewer">−</button><output id="qDeaths">${qd}</output><button type="button" data-step="1" aria-label="One more">+</button></div><span class="hint">${M.days[td-1].startAlive} birds at the start of today</span></div></div>
+    ${obsPicker("q_",dayObs(cur))}
+    <div class="fgrid" style="margin-top:14px">${condFields(cur,"q_",qd)}</div>
+    <div class="field" style="margin-top:14px"><label for="qNotes">Anything else? (optional)</label><textarea id="qNotes" rows="2" style="min-height:52px" placeholder="For example: about 5 sneezing, rain came in at night.">${esc(cur.notes||"")}</textarea></div>
+    <div style="margin-top:14px;display:flex;gap:8px"><button class="btn pri" type="button" data-act="saveToday" style="min-height:44px;padding-inline:22px">Save day ${td}</button></div></section>`:""}
+  <div class="grid2">
+    <section class="panel"><h3>Deaths by week<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:.8rem">stacked by recorded cause</span></h3>${deathsByWeekChart(M)}</section>
+    <section class="panel"><h3>Room heat vs the target band</h3>${tempBandChart(M)}
+      <p class="muted" style="font-size:.78rem;margin:8px 0 0">Keep week 1 at 32–35 °C and lower the heat about 2–3 °C each week. Chicks huddled tight are cold; spread to the walls, too hot.</p></section>
+  </div>
+  <section class="panel">
+    <div class="fgrid" style="margin-bottom:12px"><div class="field"><label for="dq">Search notes</label><input type="text" id="dq" placeholder="wheezing, diarrhea, rain…" value="${esc(dailyFilter.q)}"></div>
+    <label class="check" style="border:0;align-self:end"><input type="checkbox" id="donly" ${dailyFilter.deathsOnly?"checked":""}><span>Only days with deaths</span></label></div>
+    <div class="tw"><table><thead><tr><th>Date</th><th class="n">Day</th><th class="n">Alive (start)</th><th class="n">Deaths</th><th class="n">Alive (end)</th><th>Notes / symptoms seen</th></tr></thead><tbody>${rows||`<tr><td colspan="6" class="muted">No days match.</td></tr>`}</tbody>
+    ${Object.keys(causes).length?`<caption style="caption-side:bottom;text-align:left;padding-top:10px;font-size:.8rem;color:var(--ink2)">Deaths by cause: ${Object.entries(causes).map(([c,n])=>esc(c)+" "+n).join(" · ")}</caption>`:""}
+    <tfoot><tr class="tot"><td>Totals</td><td></td><td></td><td class="n">${M.deaths}</td><td class="n">${M.alive}</td><td>${pct(M.mortality)} death rate</td></tr></tfoot></table></div>
+  </section>`;
+}
+
+function gantt(M){
+  const ds=M.doses.filter(d=>d.s!=null);
+  if(!ds.length)return `<p class="muted">No doses logged yet.</p>`;
+  let maxDay=M.cycleDays;ds.forEach(d=>{const end=(d.safe??d.e??M.today);maxDay=Math.max(maxDay,Math.round((end-M.start)/DAY)+1)});
+  const LW=170,W=820,R=16,rowH=26,T=26,H=T+ds.length*rowH+30;
+  const x=day=>LW+(day-1)/(maxDay)*(W-LW-R);
+  const dn=ms=>(ms-M.start)/DAY+1;
+  let g=`<defs><pattern id="hatchA" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--surface)"/><line x1="0" y1="0" x2="0" y2="6" stroke="var(--anti)" stroke-width="2.4"/></pattern><pattern id="hatchS" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--surface)"/><line x1="0" y1="0" x2="0" y2="6" stroke="var(--supp)" stroke-width="2.4"/></pattern></defs>`;
+  ds.forEach((d,i)=>{if(i%2)g+=`<rect x="${LW}" y="${T+i*rowH+1}" width="${W-LW-R}" height="${rowH}" fill="var(--sunk)" opacity=".45"/>`});
+  for(let d=1;d<=maxDay+1;d+=7){g+=`<line class="gridln soft" x1="${x(d)}" x2="${x(d)}" y1="${T-6}" y2="${H-24}"/><text x="${x(d)}" y="${T-10}" text-anchor="middle">${d===1?"day 1":d}</text>`}
+  ds.forEach((d,i)=>{
+    const y=T+i*rowH+5, h=rowH-10;
+    const a=dn(d.s), b=dn(d.e??M.today)+1;
+    const cls=d.anti?"anti":"supp";
+    const tip=`<b>${esc(d.product)}</b><br>${fd(d.s,1)} to ${d.e!=null?fd(d.e,1):"still giving"}${d.daysGiven?` · ${d.daysGiven} days`:""}${d.wd?`<br>${d.wd}-day withdrawal · safe after ${fd(d.safe,1)}`:"<br>No withdrawal"}${d.notes?`<br>${esc(d.notes)}`:""}`;
+    g+=`<text class="lab" x="0" y="${y+h-2}">${esc((d.product||"").slice(0,22))}</text>`;
+    g+=`<rect class="bar-${cls}" x="${x(a)}" y="${y}" width="${Math.max(3,x(b)-x(a)-1)}" height="${h}" rx="2"/>`;
+    if(d.safe!=null){const c=dn(d.safe)+1;g+=`<rect class="wd-${cls}" x="${x(b)}" y="${y}" width="${Math.max(0,x(c)-x(b))}" height="${h}" rx="2" stroke="var(--${cls==="anti"?"anti":"supp"})" stroke-width="1"/>`}
+    g+=`<rect class="hit" x="0" y="${y-4}" width="${W}" height="${rowH}" data-tip="${esc(tip)}"/>`;
+  });
+  const sx=x(M.cycleDays+0.5), tx=x((M.today-M.start)/DAY+1.5);
+  g+=`<line class="saleln" x1="${sx}" x2="${sx}" y1="${T-6}" y2="${H-24}"/><text x="${sx}" y="${H-8}" text-anchor="end" style="fill:var(--accent)">sale · day ${M.cycleDays}</text>`;
+  if(M.dayNow>=1&&M.dayNow<=maxDay)g+=`<line class="todayln" x1="${tx}" x2="${tx}" y1="${T-6}" y2="${H-24}" stroke-opacity=".55"/><text x="${tx}" y="${H-8}" text-anchor="middle" style="fill:var(--accent)">${Math.abs(tx-sx)<60?"":"today"}</text>`;
+  return `<div class="tw"><svg class="chart" viewBox="0 0 ${W} ${H}" style="min-width:640px" role="img" aria-label="Dosing timeline with withdrawal periods">${g}</svg></div>
+  <div class="legend"><span><i style="background:var(--anti)"></i>Antibiotic given</span><span><i style="background:repeating-linear-gradient(45deg,var(--anti) 0 2px,transparent 2px 5px);border:1px solid var(--anti)"></i>Antibiotic withdrawal (no meat sale)</span><span><i style="background:var(--supp)"></i>Supplement or vitamin given</span><span><i style="border-left:2px dashed var(--accent);width:2px"></i>Planned sale</span></div>`;
+}
+
+function vHealth(M){
+  if(!S.setup)return emptyState();
+  const birds=M.onHand;
+  const calcRows=S.meds.filter(m=>num(m.rateMin)>0).map(m=>{
+    let amt,how;
+    if(m.basis==="per 100 birds per day"){const r=calc.stage==="chick"?num(m.rateMin):num(m.rateMax||m.rateMin);amt=r*birds/100;how=`${r} ${m.rateUnit} per 100 birds a day (${calc.stage==="chick"?"chick":"grower/broiler"} rate) · ${birds} birds`;
+      return `<tr><td><b>${esc(m.name)}</b><div class="muted" style="font-size:.78rem">${esc(how)}</div></td><td class="n">${amt.toFixed(1)} ${esc(m.rateUnit)} a day</td><td class="muted">split across the day's water</td></tr>`}
+    const lo=num(m.rateMin)*calc.litres, hi=num(m.rateMax||m.rateMin)*calc.litres;
+    const range=lo===hi?fmtAmt(lo):`${fmtAmt(lo)}–${fmtAmt(hi)}`;
+    const tsp=m.rateUnit==="g"?`about ${(lo/4).toFixed(lo/4<1?2:1)}${lo===hi?"":"–"+(hi/4).toFixed(hi/4<1?2:1)} level tsp`:`use a syringe or pipette`;
+    return `<tr><td><b>${esc(m.name)}</b><div class="muted" style="font-size:.78rem">${esc(m.dosage||"")}</div></td><td class="n">${range} ${esc(m.rateUnit)}</td><td class="muted">${tsp}</td></tr>`;
+  }).join("");
+  const medRows=S.meds.map(m=>`<tr class="${canWrite?"click":""}" data-edit="meds" data-id="${esc(m._id)}"><td><div style="display:flex;gap:8px;align-items:center">${thumbs(photosFor("med",m._id).slice(0,1),1)}<b>${esc(m.name)}</b></div></td><td><span class="badge-type"><i style="background:var(${/antibiotic/i.test(m.type||"")?"--anti":"--supp"})"></i>${esc(m.type)}</span></td><td>${esc(m.purpose)}</td><td>${esc(m.dosage)}</td><td class="n">${num(m.withdrawal)?num(m.withdrawal)+" days":"None"}</td><td class="n">${k(num(m.cost))}</td><td class="mono">${fd(parse(m.dateBought))}</td></tr>`).join("");
+  const doseRows=M.doses.map(d=>`<tr class="${canWrite?"click":""}" data-edit="doses" data-id="${esc(d._id)}"><td class="mono">${fd(d.s)}</td><td class="mono">${d.e!=null?fd(d.e):'<span class="chip warn">still giving</span>'}</td><td><b>${esc(d.product)}</b>${d.med?"":' <span class="chip crit">not in medicine list</span>'}</td><td class="n">${num(d.timesPerDay)||1}</td><td class="n">${d.daysGiven??"—"}</td><td class="n">${d.wd?d.wd+" d":"—"}</td><td class="mono">${d.safe!=null?fd(d.safe,1):d.wd===0||d.wd==null?"no wait":"—"}</td><td class="note">${esc(d.notes||"")}</td></tr>`).join("");
+  return `
+  <div class="vhead"><div><h2>Health & medicine</h2><p>Every course you give, its withdrawal period, and the date the birds can be sold for meat. Check every amount against the printed label on your own packet.</p></div><span class="spacer"></span>${canWrite?`<button class="btn pri" type="button" data-add="doses">Log a dose</button>`:""}</div>
+  <div class="hero" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+    <div><div class="eyebrow">Latest safe-to-sell date</div><div class="mid">${M.latestSafe!=null?fd(M.latestSafe,1):"No wait"}</div><div class="sub">across all logged doses</div></div>
+    <div><div class="eyebrow">Planned sale</div><div class="mid">${fd(M.saleMs,1)}</div><div class="sub">day ${M.cycleDays} of the cycle</div></div>
+    <div><div class="eyebrow">Status</div><div class="mid" style="font-size:1.1rem;margin-top:12px">${M.latestSafe!=null&&M.latestSafe>M.saleMs?'<span class="chip crit">Delay the sale</span>':'<span class="chip good">No conflict</span>'}</div><div class="sub">${M.latestSafe!=null&&M.saleMs!=null?Math.round((M.saleMs-M.latestSafe)/DAY)+" days of margin":""}</div></div>
+  </div>
+  ${vaxSection(M)}
+  <section class="panel"><h3>Dosing timeline</h3>${gantt(M)}</section>
+  <section class="panel"><h3>Dosing log<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:.8rem">stopped and started again? add a new row</span></h3>
+    <div class="tw"><table><thead><tr><th>First day</th><th>Last day</th><th>Product</th><th class="n">Times/day</th><th class="n">Days</th><th class="n">Wait</th><th>Safe to sell after</th><th>Notes</th></tr></thead><tbody>${doseRows||`<tr><td colspan="8" class="muted">No doses logged.</td></tr>`}</tbody></table></div></section>
+  <section class="panel"><h3>Dose calculator</h3>
+    <div class="fgrid" style="margin-bottom:12px"><div class="field"><label for="cL">Water in the jug or tank (litres)</label><input type="number" id="cL" min="0.5" step="0.5" value="${calc.litres}"></div>
+    <div class="field"><label for="cStage">Bird stage (for per-bird products)</label><select id="cStage"><option value="chick" ${calc.stage==="chick"?"selected":""}>Chicks</option><option value="grower" ${calc.stage==="grower"?"selected":""}>Growers and broilers</option></select></div></div>
+    <div class="tw"><table><thead><tr><th>Product</th><th class="n">Amount</th><th>Measuring</th></tr></thead><tbody>${calcRows||`<tr><td colspan="3" class="muted">Add a label rate to a product in the medicine list to use the calculator.</td></tr>`}</tbody></table></div>
+    <p class="muted" style="font-size:.8rem;margin:10px 0 0">A level teaspoon holds about 3–5 g of fine powder; a tablespoon holds far more. A kitchen gram scale, syringe or pipette is more exact. Mix medicated water fresh every day and make it the only water during an antibiotic course.</p></section>
+  <section class="panel"><h3>Medicine list<span class="spacer"></span>${canWrite?`<button class="btn sm" type="button" data-add="meds">Add product</button>`:""}</h3>
+    <div class="tw"><table><thead><tr><th>Product</th><th>Type</th><th>What it's for</th><th>Dosage / rate</th><th class="n">Withdrawal</th><th class="n">Cost (RWF)</th><th>Bought</th></tr></thead><tbody>${medRows||`<tr><td colspan="7" class="muted">No products yet.</td></tr>`}</tbody>
+    <tfoot><tr class="tot"><td colspan="5">Total medicine cost</td><td class="n">${k(M.medCost)}</td><td></td></tr></tfoot></table></div></section>`;
+}
+function fmtAmt(v){return v>=10?v.toFixed(0):v>=1?v.toFixed(1).replace(/\.0$/,""):v.toFixed(2)}
+
+function vFeed(M){
+  if(!S.setup)return emptyState();
+  const rows=[...S.feed].sort((a,b)=>(parse(a.date)??0)-(parse(b.date)??0));
+  const byType={};rows.forEach(f=>{const t=(f.type||"Other").trim();const key=t[0].toUpperCase()+t.slice(1).toLowerCase();byType[key]=(byType[key]||0)+num(f.bags)*num(f.kgPerBag)});
+  const mx=Math.max(1,...Object.values(byType));
+  const perBird=M.alive?M.feedKg/M.alive:0;
+  return `
+  <div class="vhead"><div><h2>Feed</h2><p>Feed is usually 60–70% of what a cycle costs, so this is where buying well pays most.</p></div><span class="spacer"></span>${canWrite?`<button class="btn pri" type="button" data-add="feed">Add purchase</button>`:""}</div>
+  <div class="hero">
+    <div><div class="eyebrow">Feed bought</div><div class="big">${k(M.feedKg)}<small> kg</small></div><div class="sub">${rows.reduce((a,f)=>a+num(f.bags),0)} bags</div></div>
+    <div><div class="eyebrow">Feed cost</div><div class="mid">${k(M.feedCost)}</div><div class="sub">RWF · ${M.totalCost?pct(M.feedCost/M.totalCost,0):"—"} of total cost</div></div>
+    <div><div class="eyebrow">Average price</div><div class="mid">${M.feedKg?k(M.feedCost/M.feedKg):"—"}</div><div class="sub">RWF per kg</div></div>
+    <div><div class="eyebrow">Per live bird</div><div class="mid">${perBird.toFixed(2)} kg</div><div class="sub">A 1.8–2 kg broiler usually eats about 3–4 kg by sale</div></div>
+  </div>
+  <div class="grid2">
+  <section class="panel"><h3>Purchases</h3><div class="tw"><table><thead><tr><th>Date</th><th>Feed type</th><th class="n">Bags</th><th class="n">kg/bag</th><th class="n">Cost/bag</th><th class="n">Total (RWF)</th></tr></thead><tbody>
+  ${rows.map(f=>`<tr class="${canWrite?"click":""}" data-edit="feed" data-id="${esc(f._id)}"><td class="mono">${fd(parse(f.date),1)}</td><td>${esc(f.type)}</td><td class="n">${num(f.bags)}</td><td class="n">${num(f.kgPerBag)}</td><td class="n">${k(num(f.costPerBag))}</td><td class="n">${k(num(f.bags)*num(f.costPerBag))}</td></tr>`).join("")||`<tr><td colspan="6" class="muted">No purchases yet.</td></tr>`}
+  </tbody><tfoot><tr class="tot"><td colspan="2">Total feed</td><td class="n">${rows.reduce((a,f)=>a+num(f.bags),0)}</td><td></td><td></td><td class="n">${k(M.feedCost)}</td></tr></tfoot></table></div></section>
+  <section class="panel"><h3>Kilograms by stage</h3><div class="hbar">${Object.entries(byType).map(([t,v])=>`<span>${esc(t)}</span><span class="tr"><i style="width:${(v/mx*100).toFixed(1)}%"></i></span><span class="v">${k(v)} kg</span>`).join("")||'<span class="muted">No feed yet.</span>'}</div>
+  <p class="muted" style="font-size:.82rem;margin:14px 0 0">Switch feed by stage: pre-starter and starter for the first weeks, then grower and finisher. Feed until full and keep feeders from running empty, especially in week 1.</p></section>
+  </div>`;
+}
+
+const MAT_CATS=["Housing & heating","Feeding & water","Bedding & cleaning","Protective gear","Measuring & medicine tools","Other"];
+function statusChip(st){const c={"Have it":"good","Running low":"warn","Need to buy":"crit","Broken or worn out":"crit"}[st]||"neutral";return `<span class="chip ${c}">${esc(st||"—")}</span>`}
+function vMaterials(M){
+  if(!S.setup)return emptyState();
+  const byCat={};S.materials.forEach(m=>{const c=MAT_CATS.includes(m.category)?m.category:"Other";(byCat[c]=byCat[c]||[]).push(m)});
+  const diff=Math.round(M.matCycle)-Math.round(M.coop);
+  const sections=MAT_CATS.filter(c=>byCat[c]).map(c=>`<section class="panel"><h3>${esc(c)}<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:.8rem">${k(byCat[c].reduce((a,m)=>a+M.matCost(m),0))} RWF</span></h3>
+    <div class="tw"><table class="mat"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Cost (RWF)</th><th>Kind</th><th>Status</th><th>Bought</th><th>Notes</th></tr></thead><tbody>
+    ${byCat[c].sort((a,b)=>String(a.name).localeCompare(String(b.name))).map(m=>{const ph=photosFor("material",m._id);return `<tr class="${canWrite?"click":""}" data-edit="materials" data-id="${esc(m._id)}"><td><div style="display:flex;gap:8px;align-items:center">${ph.length?thumbs(ph.slice(0,1),1):(canWrite&&assets?`<button type="button" class="addph" style="width:40px;height:40px;font-size:.66rem" data-upload="material" data-key="${esc(m._id)}" title="Add a photo">+ photo</button>`:"")}<div><b>${esc(m.name)}</b>${m.where?`<div class="muted" style="font-size:.76rem">${esc(m.where)}</div>`:""}</div></div></td>
+      <td class="n">${m.qty!=null?num(m.qty):"—"} ${esc(m.unit||"")}</td><td class="n">${num(m.unitCost)?k(M.matCost(m)):'<span class="muted">—</span>'}</td><td>${esc(m.kind||"")}${m.kind==="Reusable"&&num(m.cycles)>1?`<div class="muted" style="font-size:.76rem">${num(m.cycles)} cycles</div>`:""}</td><td>${statusChip(m.status)}</td><td class="mono">${fd(parse(m.dateBought))}</td><td class="note">${esc(m.notes||"")}</td></tr>`}).join("")}
+    </tbody></table></div></section>`).join("");
+  return `
+  <div class="vhead"><div><h2>Materials</h2><p>Everything the flock room runs on: housing, heat, drinkers and feeders, bedding, protective gear and measuring tools. Reusable items are spread over the cycles they last, so each cycle carries a fair share of their cost.</p></div><span class="spacer"></span>${canWrite?`<button class="btn pri" type="button" data-add="materials">Add item</button>`:""}</div>
+  <div class="hero">
+    <div><div class="eyebrow">Items</div><div class="big">${S.materials.length}</div><div class="sub">${S.materials.filter(m=>m.kind==="Reusable").length} reusable · ${S.materials.filter(m=>m.kind!=="Reusable").length} used up</div></div>
+    <div><div class="eyebrow">Spent on materials</div><div class="mid">${k(M.matSpent)}</div><div class="sub">RWF, all items with a price</div></div>
+    <div><div class="eyebrow">Share for this cycle</div><div class="mid">${k(M.matCycle)}</div><div class="sub">${M.coop?(diff===0?"Matches the coop share in Setup":`Setup uses ${k(M.coop)} RWF`):"Not yet in the cost summary"}${canWrite&&diff!==0?` · <button type="button" class="btn ghost sm" style="padding:0" data-act="useMatShare">Use this figure</button>`:""}</div></div>
+    <div><div class="eyebrow">Shopping list</div><div class="mid">${M.shopping.length}</div><div class="sub">${M.shopping.length?"items to buy or replace":"Nothing to buy"}</div></div>
+  </div>
+  ${M.shopping.length?`<section class="panel"><h3>Shopping list</h3>${M.shopping.map(m=>`<div class="check"><span style="flex:1"><b>${esc(m.name)}</b>${m.notes?` <span class="muted">· ${esc(m.notes)}</span>`:""}</span>${statusChip(m.status)}${canWrite?`<button type="button" class="btn sm" data-gotit="${esc(m._id)}">Bought</button>`:""}</div>`).join("")}</section>`:""}
+  ${sections||`<div class="empty">No materials yet. Add the drinkers, feeders, heater, bedding and gear you use.</div>`}`;
+}
+function vMoney(M){
+  if(!S.setup)return emptyState();
+  const lastBag=[...S.feed].sort((a,b)=>(parse(b.date)??0)-(parse(a.date)??0))[0];
+  const bagCost=lastBag?num(lastBag.costPerBag):0;
+  if(!scen)scen={birds:M.onHand,weight:M.weight||1.8,price:M.price||4500,bags:0,extra:0};
+  const sCost=M.totalCost+scen.bags*bagCost+scen.extra;
+  const sRev=M.salesAmt+scen.birds*scen.weight*scen.price;
+  const sProfit=sRev-sCost;
+  const breakeven=scen.birds*scen.weight?sCost/(scen.birds*scen.weight):0;
+  const lo=num(M.st.priceLow)||3200, hi=num(M.st.priceHigh)||5000;
+  const prices=[lo,4000,4500,4800,hi].filter((v,i,a)=>a.indexOf(v)===i).sort((a,b)=>a-b);
+  const weights=[1.6,1.8,2.0,2.2];
+  const sens=weights.map(w=>`<tr><th class="n">${w.toFixed(1)} kg</th>${prices.map(p=>{const v=M.salesAmt+scen.birds*w*p-sCost;return `<td class="n ${v<0?"neg":""} ${Math.abs(w-scen.weight)<1e-9&&p===scen.price?"cur":""}">${k(v)}</td>`}).join("")}</tr>`).join("");
+  const sp=Math.max(0,M.profit);
+  return `
+  <div class="vhead"><div><h2>Money</h2><p>The cycle summary uses what you have entered so far. The planner below lets you test weights, prices and the feed still to buy before the sale.</p></div></div>
+  <section class="panel"><h3>Cost against flock value<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:.8rem">where the green line passes the orange, the batch is in profit</span></h3>
+    ${breakevenChart(M)}
+    <p class="muted" style="font-size:.8rem;margin:10px 0 0">Flock value is the birds alive on each day at their expected weight for that day × ${k(M.price)} RWF/kg. It uses the target growth path, so it is an estimate until you weigh the birds. Dashed lines are the projection to the sale on ${fd(M.saleMs,1)}.</p></section>
+  <div class="grid2">
+  <section class="panel"><h3>Cycle summary</h3><div class="kv">
+    <div class="sec">Flock</div><div class="sec"></div>
+    <div>Chicks paid for</div><div>${M.chicks}</div><div>Total chicks in flock (with ${M.bonus} free)</div><div>${M.flock}</div>
+    <div>Total deaths</div><div>${M.deaths}</div>${M.soldBirds?`<div>Birds sold</div><div>${M.soldBirds}</div>`:""}<div>Birds still on the farm</div><div>${M.onHand}</div><div>Death rate</div><div>${pct(M.mortality)}</div>
+    <div class="sec">Costs</div><div class="sec"></div>
+    <div>Chicks (${M.chicks} × ${k(num(M.st.pricePerChick))})</div><div>${k(M.chickCost)}</div><div>Feed</div><div>${k(M.feedCost)}</div><div>Medicine and vitamins</div><div>${k(M.medCost)}</div><div>Other costs</div><div>${k(M.other)}</div><div>Materials and equipment share</div><div>${k(M.coop)}</div><div>Expenses book</div><div>${k(M.expTotal)}</div>
+    <div class="em">Total cost</div><div class="em">${rwf(M.totalCost)}</div>
+    <div class="sec">Revenue</div><div class="sec"></div>
+    <div>Sales recorded (${M.soldBirds} birds)</div><div>${k(M.salesAmt)}</div>${M.onHand?`<div>Expected for ${M.onHand} birds on hand</div><div>${M.onHand} × ${M.weight} × ${k(M.price)}</div>`:""}<div class="em">Total revenue</div><div class="em">${rwf(M.revenue)}</div>
+    <div class="sec">Profit</div><div class="sec"></div>
+    <div class="em">Total profit</div><div class="em" style="color:var(${M.profit<0?"--crit":"--ink"})">${rwf(M.profit)}</div>
+    <div>Profit per bird</div><div>${M.alive?k(M.profit/M.alive):"—"}</div><div>Cost per kg live weight</div><div>${M.costPerKg?k(M.costPerKg):"—"}</div><div>Feed conversion (FCR)</div><div>${M.fcr!=null?M.fcr.toFixed(2):"—"}</div><div>Profit margin</div><div>${M.revenue?pct(M.profit/M.revenue):"—"}</div><div>Feed as share of cost</div><div>${M.totalCost?pct(M.feedCost/M.totalCost):"—"}</div>
+  </div><p class="muted" style="font-size:.8rem;margin:12px 0 0">${num(M.st.actualWeight)?"Uses the actual sale weight from Setup.":"Uses the target weight until you enter the actual sale weight in Setup. Feed still to buy is not included here."}</p></section>
+  <section class="panel"><h3>Sale planner</h3>
+    <div class="fgrid">
+      ${rng("sBirds",M.soldBirds?"Birds still to sell":"Birds sold",scen.birds,0,Math.max(1,M.onHand),1,v=>v)}
+      ${rng("sWeight","Average weight per bird",scen.weight,1.2,2.6,0.05,v=>(+v).toFixed(2)+" kg")}
+      ${rng("sPrice","Price per kg",scen.price,lo-400,hi+400,100,v=>k(v)+" RWF")}
+      ${rng("sBags","Feed bags still to buy",scen.bags,0,12,1,v=>v+" bags")}
+      <div class="field"><label for="sExtra">Other costs still to come (RWF)</label><input type="number" id="sExtra" min="0" step="500" value="${scen.extra}"></div>
+    </div>
+    <div class="kv" style="margin-top:16px"><div>Revenue</div><div>${rwf(sRev)}</div><div>Cost</div><div>${rwf(sCost)}</div><div class="em">Profit</div><div class="em" style="color:var(${sProfit<0?"--crit":"--good"})">${rwf(sProfit)}</div><div>Margin</div><div>${sRev?pct(sProfit/sRev):"—"}</div><div>Break-even price</div><div>${k(breakeven)} RWF/kg</div></div>
+    <h3 style="margin:18px 0 8px;font-size:.92rem">Profit at other weights and prices</h3>
+    <div class="tw"><table class="sens"><thead><tr><th></th>${prices.map(p=>`<th class="n">${k(p)}/kg</th>`).join("")}</tr></thead><tbody>${sens}</tbody></table></div>
+    <p class="muted" style="font-size:.78rem;margin:8px 0 0">RWF profit for ${scen.birds} birds with ${scen.bags} more bags of feed. The outlined cell is the current setting.</p>
+  </section></div>
+  <section class="panel"><h3>Splitting this cycle's profit</h3>
+    <div class="grid3" style="gap:12px">
+      ${[["Back into the farm",0.5,"Chicks, feed and equipment for the next cycle"],["Trading capital",0.3,"Only money you can afford to lose"],["Savings",0.2,"Kept aside"]].map(([l,p,n])=>`<div><div class="eyebrow">${l} · ${p*100}%</div><div class="mid">${k(sp*p)}</div><div class="sub">${n}</div></div>`).join("")}
+    </div>
+    <p class="muted" style="font-size:.8rem;margin:12px 0 0">Based on the projected profit of ${rwf(M.profit)}. With a partner, agree in writing whether a 50/50 split is of profit or of sales, what counts as profit, and who pays for feed along the way. Investors get their money back first, then profit is split.</p></section>`;
+}
+function rng(id,label,val,min,max,step,f){return `<div class="field"><div class="rangehead"><label for="${id}">${label}</label><output id="${id}o">${f(val)}</output></div><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}"></div>`}
+
+function vTasks(M){
+  const t=iso(M.today);const c=S.checks[t]?.items||{};
+  const todos=[...S.todos].sort((a,b)=>(a.done?1:0)-(b.done?1:0)||(parse(a.date)??9e15)-(parse(b.date)??9e15));
+  const hist=Object.keys(S.checks).sort().reverse().slice(0,10);
+  return `
+  <div class="vhead"><div><h2>Checklist & to-dos</h2><p>Tick each check as you do it. The list starts fresh every day, and past days stay on record.</p></div></div>
+  <div class="grid2">
+  <section class="panel"><h3>Today · ${fd(M.today,1)}${M.dayNow?` · day ${M.dayNow}`:""}<span class="spacer"></span><span class="chip ${CHECK_ITEMS.every(x=>c[x[0]])?"good":"neutral"}">${CHECK_ITEMS.filter(x=>c[x[0]]).length}/${CHECK_ITEMS.length}</span></h3>
+    ${CHECK_ITEMS.map(([id,l])=>`<label class="check ${c[id]?"done":""}"><input type="checkbox" data-check="${id}" ${c[id]?"checked":""} ${canWrite?"":"disabled"}><span>${l}</span></label>`).join("")}
+    ${hist.length?`<div class="eyebrow" style="margin-top:16px">Recent days</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${hist.map(h=>{const it=S.checks[h]?.items||{};const n=CHECK_ITEMS.filter(x=>it[x[0]]).length;return `<span class="chip ${n===CHECK_ITEMS.length?"good":n?"warn":"neutral"}">${fd(parse(h))} · ${n}/${CHECK_ITEMS.length}</span>`}).join("")}</div>`:""}
+  </section>
+  <section class="panel"><h3>To-dos<span class="spacer"></span>${canWrite?`<button class="btn sm" type="button" data-add="todos">Add to-do</button>`:""}</h3>
+    ${todos.length?todos.map(td=>{const due=parse(td.date);const late=!td.done&&due!=null&&due<M.today;return `<div class="check ${td.done?"done":""}"><input type="checkbox" data-todo="${esc(td._id)}" ${td.done?"checked":""} ${canWrite?"":"disabled"} aria-label="Done"><div style="flex:1;min-width:0"><span>${esc(td.text)}</span><div class="muted" style="font-size:.78rem">${due!=null?(late?'<span class="chip warn">overdue</span> ':"")+"Due "+fd(due,1):"No date"}${td.notes?" · "+esc(td.notes):""}</div></div>${canWrite?`<button class="btn ghost sm" type="button" data-edit="todos" data-id="${esc(td._id)}">Edit</button>`:""}</div>`}).join(""):`<p class="muted">No to-dos yet.</p>`}
+  </section></div>
+  <section class="panel"><h3>What the maid does</h3><div class="prose"><ul>
+    <li>Morning and midday: he refills and cleans the water, checks the feed is dry, checks the heat, and removes wet bedding and any dead birds.</li>
+    <li>He reports problems the same day, and calls straight away if more than 1–2 birds are sick or die in one day.</li>
+    <li>He feeds, waters, cleans and reports only. No medicine and no diagnosing.</li>
+    <li>No outside visitors in the room. Wash hands before and after.</li></ul></div></section>`;
+}
+
+function vYear(M){
+  const cur=S.setup?{cycle:S.setup.cycleName||"Current",start:S.setup.startDate,chicks:M.chicks,deaths:M.deaths,mort:M.mortality,cost:M.totalCost,revenue:M.revenue,live:true}:null;
+  const done=[...S.cycles].sort((a,b)=>num(a.cycle)-num(b.cycle));
+  const rows=done.map(c=>({cycle:"Cycle "+num(c.cycle),start:c.start,chicks:num(c.chicks),deaths:num(c.deaths),mort:num(c.chicks)?num(c.deaths)/(num(c.chicks)+num(c.bonus)):0,cost:num(c.cost),revenue:num(c.revenue),_id:c._id}));
+  const showCur=cur&&!done.some(c=>c.start===S.setup.startDate);
+  const all=showCur?[...rows,cur]:rows;
+  const tc=all.reduce((a,r)=>a+r.cost,0),tr=all.reduce((a,r)=>a+r.revenue,0);
+  return `
+  <div class="vhead"><div><h2>Year view</h2><p>A 45-day cycle plus about a week to clean leaves room for 6–7 cycles a year in the same space. Close each cycle when it is sold to keep its final numbers here.</p></div><span class="spacer"></span>${canWrite&&S.setup?`<button class="btn" type="button" data-act="closeCycle">Save current cycle's results</button>`:""}${canWrite?`<button class="btn pri" type="button" data-add="cycles">Add a cycle</button>`:""}</div>
+  <section class="panel"><div class="tw"><table><thead><tr><th>Cycle</th><th>Start</th><th class="n">Chicks</th><th class="n">Deaths</th><th class="n">Death rate</th><th class="n">Cost (RWF)</th><th class="n">Revenue (RWF)</th><th class="n">Profit (RWF)</th></tr></thead><tbody>
+  ${all.map(r=>`<tr class="${r.live||!canWrite?"":"click"}" ${r._id?`data-edit="cycles" data-id="${esc(r._id)}"`:""}><td><b>${esc(r.cycle)}</b> ${r.live?'<span class="chip info">in progress, projected</span>':""}</td><td class="mono">${fd(parse(r.start),1)}</td><td class="n">${r.chicks}</td><td class="n">${r.deaths}</td><td class="n">${pct(r.mort)}</td><td class="n">${k(r.cost)}</td><td class="n">${k(r.revenue)}</td><td class="n" style="color:var(${r.revenue-r.cost<0?"--crit":"--ink"})">${k(r.revenue-r.cost)}</td></tr>`).join("")||`<tr><td colspan="8" class="muted">No cycles yet.</td></tr>`}
+  </tbody><tfoot><tr class="tot"><td colspan="5">Total for the year</td><td class="n">${k(tc)}</td><td class="n">${k(tr)}</td><td class="n">${k(tr-tc)}</td></tr></tfoot></table></div></section>
+  <section class="panel"><h3>Cost and revenue by cycle<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:.8rem">profit is the gap</span></h3>${cycleCompareChart(all)}
+    <p class="muted" style="font-size:.8rem;margin:10px 0 0">Each pair is one cycle: orange is what it cost, green is what it brought in. This cycle is projected until you close it after the sale.</p></section>
+  <section class="panel"><h3>What a year could look like</h3><p class="ink2" style="margin:0;max-width:70ch">At this cycle's projected profit of <b>${rwf(M.profit)}</b>, six cycles would give about <b>${rwf(M.profit*6)}</b> and seven about <b>${rwf(M.profit*7)}</b>. Growing to 200–300 birds is usually a better way to scale than squeezing the last few percent out of 100.</p></section>`;
+}
+
+function vGuide(){
+  return `
+  <div class="vhead"><div><h2>Care guide</h2><p>The key advice from your earlier conversations, kept in one place. It is general guidance, not a diagnosis. For serious or spreading problems, a vet or the RAB office should look at the birds.</p></div></div>
+  <div class="grid2">
+  <section class="panel"><h3>Death rate: what to expect</h3><div class="tw"><table><thead><tr><th>Death rate</th><th class="n">Birds of 102</th><th>Meaning</th></tr></thead><tbody>
+    <tr><td><span class="chip good">2%</span></td><td class="n">about 2</td><td>Your goal; possible with very good care</td></tr>
+    <tr><td><span class="chip neutral">1–5%</span></td><td class="n">1–5</td><td>Normal range for a 45-day cycle</td></tr>
+    <tr><td><span class="chip warn">5–10%</span></td><td class="n">5–10</td><td>What many beginners lose; profit starts to suffer</td></tr></tbody></table></div>
+    <div class="prose"><p>About 80% of chick deaths happen in week 1. Deaths drop in weeks 2–3 and can rise a little in weeks 4–6 as fast growth strains the heart and lungs. Watch for a swollen belly, purple comb, hard breathing, or a chick that sits all the time.</p></div></section>
+  <section class="panel"><h3>Heat and space</h3><div class="prose"><ul>
+    <li>Week 1: 32–35 °C, then lower the heat about 2–3 °C each week. Keep the heater at night for a while, especially in rainy, cool weather.</li>
+    <li>Chicks huddled tight under the heat are cold; chicks spread to the walls are too hot.</li>
+    <li>Charcoal gives off fumes. Keep fresh air moving and do not stay in a closed room with burning charcoal.</li>
+    <li>Space: about 5 m² in weeks 1–2, 7–9 m² in weeks 3–4, 9–14 m² near full size. A 3.5 × 4 m room works if you section it at first.</li></ul></div></section>
+  <section class="panel"><h3>Bedding and ammonia</h3><div class="prose"><ul>
+    <li>A strong sharp smell is ammonia from wet droppings and soggy shavings. It burns eyes, nose and lungs, so chicks sneeze and wheeze, and it helps coccidiosis spread.</li>
+    <li>Remove wet and clumped shavings daily and add fresh pine or similar shavings 5–10 cm deep. Avoid cedar.</li>
+    <li>Raise drinkers on a board, stir the shavings every day or two, and open windows on opposite sides during the day.</li>
+    <li>Squeeze test: a handful should fall apart, not clump. Walk-in test: step outside for a few minutes, then walk in. The first smell is what the chicks breathe all day.</li></ul></div></section>
+  <section class="panel"><h3>Medicine rules</h3><div class="prose"><ul>
+    <li>No meat sale until the withdrawal days have passed after the last dose.</li>
+    <li>Enrosol-S: pause calcium, Multisol, Liver-Extra and Broiler Booster during the course; minerals can stop it from working. Do not combine it with chloramphenicol, tetracyclines, erythromycin or lincomycin.</li>
+    <li>Do not give two antibiotics at the same time without asking a vet.</li>
+    <li>Antibiotics only help bacterial infections, not viruses (IB, Newcastle) and not mites. Water does not fix wheezing.</li>
+    <li>Vaccinate only once the chicks have stopped sneezing and the room is dry.</li></ul></div></section>
+  <section class="panel"><h3>Protective gear</h3><div class="prose"><ul>
+    <li>Old clothes kept only for the room, and rubber boots.</li>
+    <li>A surgical mask for daily work; N95 or KN95 for deep cleaning.</li>
+    <li>Disposable nitrile gloves when handling sick or dead birds or cleaning. Wash with soap every time.</li>
+    <li>Shuffle your boots and look down so you do not step on chicks.</li></ul></div></section>
+  <section class="panel"><h3>Daily routine around school</h3><div class="timeline">
+    <div class="d">6:30</div><div>Wake up; morning check (30–45 min)</div>
+    <div class="d">8:30–15:30</div><div>School; the maid covers water, feed and bedding</div>
+    <div class="d">16:00–18:00</div><div>Main session in the room</div>
+    <div class="d">18:45–20:45</div><div>Homework</div>
+    <div class="d">20:45–21:45</div><div>Evening check</div>
+    <div class="d">23:00</div><div>Sleep. A tired person misses problems with the chicks.</div></div></section>
+  </div>
+  <section class="panel"><h3>What happened this cycle</h3><div class="timeline">
+    <div class="d">21 Sep</div><div><b>Chicks arrived</b> (102). Count by moving small batches into a box; quiet chicks around the heat are usually content.</div>
+    <div class="d">22 Sep</div><div><b>One chick isolating itself.</b> Check eyes, feathers, vent, legs and breathing; set it near food and water and watch.</div>
+    <div class="d">Late Sep</div><div><b>Diarrhea.</b> Likely coccidiosis or a gut infection; treated with sulfadimidine.</div>
+    <div class="d">Early Oct</div><div><b>Sneezing after rain; heater removed at about 2 weeks.</b> Wet bedding and ammonia likely. Dry shavings, cross-ventilation, heater back at night.</div>
+    <div class="d">9 Oct</div><div><b>A chick with bare pink skin and drooping eyes.</b> Warm dry box, water with vitamins, check for mites, see an agrovet or vet.</div>
+    <div class="d">18 Oct</div><div><b>A chick died with fluid in its belly.</b> Possible ascites or a bacterial infection; a vet can open a dead bird to find the cause.</div>
+    <div class="d">About 20 Oct</div><div><b>Wheezing.</b> Check ammonia, bedding, charcoal fumes and drafts. Could be IB, CRD or E. coli; a vet can tell.</div>
+    <div class="d">22 Oct</div><div><b>Swollen vent on some energetic chicks.</b> Do not squeeze or drain. Could be pecking, stuck droppings, mites, prolapse or a bruise. Get a close-up photo looked at.</div></div></section>`;
+}
+
+function vPhotos(M){
+  if(!S.setup)return emptyState();
+  const dayPh=S.photos.filter(p=>p.kind==="day").sort((a,b)=>num(a.day)-num(b.day)||String(a.createdAt).localeCompare(String(b.createdAt)));
+  const first=dayPh[0], last=dayPh.length?dayPh.filter(p=>num(p.day)===num(dayPh[dayPh.length-1].day)).slice(-1)[0]:null;
+  const withPh=[...new Set(dayPh.map(p=>num(p.day)))].sort((x,y)=>x-y);
+  let tiles="";
+  if(showAllDays){for(const d of M.days){
+    const ph=photosFor("day",d.day);const fut=M.dayNow!=null&&d.day>M.dayNow;
+    const cls=`tile ${ph.length?"has":""} ${fut?"fut":""} ${d.day===M.dayNow?"today":""}`;
+    tiles+=ph.length?`<button type="button" class="${cls}" data-dayph="${d.day}" aria-label="Day ${d.day} photos"><img src="${blob(ph[ph.length-1].assetId)}" alt="" loading="lazy"><span class="cap"><span>Day ${d.day}</span><span>${ph.length>1?ph.length+" photos":fd(d.date)}</span></span></button>`
+      :`<button type="button" class="${cls}" ${fut?"disabled":`data-dayph="${d.day}"`}><b>Day ${d.day}</b><span class="plus">${fd(d.date)}</span>${!fut&&canWrite&&assets?'<span class="plus">+ add</span>':""}</button>`;
+  }}
+  const list=withPh.map(n=>{const d=M.days[n-1];const ph=photosFor("day",n);return `<div class="pday"><div class="when"><b>Day ${n}</b><span>${fd(d.date,1)} · ${d.endAlive} birds</span>${canWrite?`<div><button type="button" class="btn ghost sm" style="padding-left:0" data-dayph="${n}">Captions, move or delete</button></div>`:""}</div><div class="thumbs">${thumbs(ph)}</div></div>`}).join("");
+  const medRows=S.meds.map(m=>{const ph=photosFor("med",m._id);return `<div class="medph"><div><b>${esc(m.name)}</b><div class="muted" style="font-size:.8rem">${esc(m.type||"")}${num(m.withdrawal)?` · ${num(m.withdrawal)}-day wait`:""}</div><div class="muted" style="font-size:.78rem;margin-top:4px">Photograph the front, the dose table and the withdrawal line on the label.</div></div><div class="thumbs">${thumbs(ph)}${addBtn("med",m._id)}${!ph.length&&!(canWrite&&assets)?'<span class="muted">No photos yet.</span>':""}</div></div>`}).join("");
+  const other=photosFor("other");
+  return `
+  <div class="vhead"><div><h2>Photos</h2><p>Pictures from across the cycle show how the broilers grow from chick to sale. Medicine photos keep the label doses and withdrawal days on hand.</p></div></div>
+  ${!assets?`<div class="empty">Photo saving is not available in this browser window. Open the page in a normal (not private) window.</div>`:""}
+  ${first&&last&&num(first.day)!==num(last.day)?`<section class="panel"><h3>How they have grown</h3><div class="compare">
+    <figure><img src="${blob(first.assetId)}" alt="Day ${first.day}" data-view="${esc(first._id)}"><figcaption><b>Day ${first.day}</b> · ${fd(parse(first.date),1)}</figcaption></figure>
+    <figure><img src="${blob(last.assetId)}" alt="Day ${last.day}" data-view="${esc(last._id)}"><figcaption><b>Day ${last.day}</b> · ${fd(parse(last.date),1)} · ${num(last.day)-num(first.day)} days later</figcaption></figure></div></section>`:""}
+  <section class="panel"><h3>Growth diary<span class="spacer"></span>${dayPh.length?`<span class="chip neutral">${dayPh.length} photo${dayPh.length===1?"":"s"} · ${withPh.length} day${withPh.length===1?"":"s"}</span>`:""}${canWrite&&assets?`<button type="button" class="btn pri sm" data-upload="day" data-key="">Add flock photos</button>`:""}<button type="button" class="btn sm" data-act="toggleDays">${showAllDays?"Hide day grid":"Pick a day"}</button></h3>
+    ${showAllDays?`<div class="days" style="margin-bottom:14px">${tiles}</div>`:""}
+    ${list?`<div class="pdays">${list}</div>`:`<div class="empty">No flock photos yet. Add any pictures you already have; each one is placed on its cycle day from the date it was taken.</div>`}
+    <p class="muted" style="font-size:.8rem;margin:12px 0 0">You do not need a photo every day. One every few days, or once a week, is enough to see the growth. Taking them from the same spot in daylight makes the comparison clearer.</p></section>
+  <section class="panel"><h3>Medicine photos</h3>${medRows||'<p class="muted">Add products in Health & medicine first.</p>'}</section>
+  <section class="panel"><h3>Other photos<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:.8rem">room, feed bags, receipts, equipment</span></h3><div class="thumbs">${thumbs(other)}${addBtn("other","")}${!other.length&&!(canWrite&&assets)?'<span class="muted">No photos yet.</span>':""}</div></section>`;
+}
+function dayPhotoPanel(day){
+  const ph=photosFor("day",day);
+  return `<div class="eyebrow" style="margin:16px 0 8px">Photos of day ${day}</div>${ph.length?ph.map(p=>`<div class="pedit"><button type="button" class="thumb" data-view="${esc(p._id)}"><img src="${blob(p.assetId)}" alt=""></button><div style="display:flex;flex-direction:column;gap:6px;min-width:0"><input type="text" data-cap="${esc(p._id)}" value="${esc(p.caption||"")}" placeholder="Caption, e.g. about 5 sneezing" ${canWrite?"":"disabled"}>${canWrite?`<label class="muted" style="font-size:.76rem;display:flex;gap:6px;align-items:center">Move to day <input type="number" min="1" max="${derive().cycleDays}" value="${num(p.day)}" data-moveph="${esc(p._id)}" style="width:72px;padding:4px 6px"></label>`:""}</div>${canWrite?`<button type="button" class="btn ghost sm" data-delph="${esc(p._id)}">Delete</button>`:"<span></span>"}</div>`).join(""):'<p class="muted" style="margin:0 0 8px">No photos for this day yet.</p>'}<div style="margin-top:8px">${addBtn("day",day,"+ Add photos")}</div>`;
+}
+/* ---------- growth, FCR ---------- */
+const ROSS=[[0,44],[7,213],[14,533],[21,1012],[28,1616],[35,2296],[42,2998],[45,3295]];
+function targetAt(day,M){const tgt=num(M.st.targetWeight)||2;const end=M.cycleDays;const r=d=>{d=Math.max(0,Math.min(45,d));for(let i=1;i<ROSS.length;i++){if(d<=ROSS[i][0]){const [a,av]=ROSS[i-1],[b,bv]=ROSS[i];return av+(bv-av)*(d-a)/(b-a)}}return ROSS[ROSS.length-1][1]};
+  const scale=(tgt*1000)/r(Math.min(45,end));return r(day*Math.min(45,end)/end)*scale/1000}
+function growthChart(M){
+  const W=640,H=250,L=40,R=16,T=16,B=30;const base=H-B;
+  const maxW=Math.max(num(M.st.targetWeight)||2,...M.weighins.map(w=>w.avg))*1.08;
+  const x=d=>L+d/M.cycleDays*(W-L-R), y=v=>T+(1-v/maxW)*(H-T-B);
+  let tp="";for(let d=0;d<=M.cycleDays;d++)tp+=(d?"L":"M")+x(d).toFixed(1)+","+y(targetAt(d,M)).toFixed(1);
+  const tArea=`${tp}L${x(M.cycleDays).toFixed(1)},${base} L${x(0).toFixed(1)},${base} Z`;
+  let gp="";M.weighins.forEach((w,i)=>{gp+=(i?"L":"M")+x(w.day).toFixed(1)+","+y(w.avg).toFixed(1)});
+  let yt="";const st=maxW>2.4?0.5:0.25;for(let v=0;v<=maxW;v+=st)yt+=`<line class="gridln soft" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-8}" y="${y(v)+3.5}" text-anchor="end">${v.toFixed(v%1?2:0)}</text>`;
+  let xt="";[0,7,14,21,28,35,42].filter(d=>d<=M.cycleDays).concat([M.cycleDays]).forEach(d=>xt+=`<text x="${x(d)}" y="${H-10}" text-anchor="middle">${d}</text>`);
+  const dots=M.weighins.map(w=>`<circle class="gdot" cx="${x(w.day)}" cy="${y(w.avg)}" r="4.5"/>`).join("");
+  const hits=M.weighins.map(w=>{const t=targetAt(w.day,M);return `<rect class="hit" x="${(x(w.day)-12).toFixed(1)}" y="${T}" width="24" height="${base-T}" data-cx="${x(w.day).toFixed(1)}" data-cy="${y(w.avg).toFixed(1)},${y(t).toFixed(1)}" data-tip="${esc(`<b>Day ${w.day}</b> · ${fd(parse(w.date),1)}<br>${tk("Average",w.avg.toFixed(2)+" kg")} (${w.birds} birds)<br>${tk("Target path",t.toFixed(2)+" kg")} · ${w.avg>=t?'<b style="color:var(--good)">on or above</b>':'<b style="color:var(--warn)">behind by '+(t-w.avg).toFixed(2)+" kg</b>"}${w.fcr?`<br>${tk("FCR",w.fcr.toFixed(2))}`:""}`)}"/>`}).join("");
+  const last=M.weighins[M.weighins.length-1];
+  const tag=last?`<rect class="tag" x="${(x(last.day)-17).toFixed(1)}" y="${(y(last.avg)-24).toFixed(1)}" width="34" height="16" rx="3"/><text class="tagt" x="${x(last.day).toFixed(1)}" y="${(y(last.avg)-12).toFixed(1)}" text-anchor="middle">${last.avg.toFixed(2)}</text>`:"";
+  const today=M.dayNow>=0&&M.dayNow<=M.cycleDays?`<line class="todayln" x1="${x(M.dayNow)}" x2="${x(M.dayNow)}" y1="${T}" y2="${base}" stroke-opacity=".55"/>`:"";
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Average weight against the target path"><defs><linearGradient id="gGrow" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".12"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>${yt}<path class="band" d="${tArea}" fill="url(#gGrow)"/><path class="proj" d="${tp}"/>${today}<path class="series" d="${gp}"/>${dots}${tag}<line class="axis" x1="${L}" x2="${W-R}" y1="${base}" y2="${base}"/>${xt}<text x="${L}" y="${H}" class="lab" style="font-size:10px">day of cycle · kg per bird</text>${xhairG(T,base,3)}${hits}</svg>
+  <div class="legend"><span><i class="line" style="background:var(--ink)"></i>Your weigh-ins</span><span><i class="dash"></i>Target path to ${num(M.st.targetWeight)||2} kg</span><span><i class="line" style="background:var(--accent)"></i>Today</span></div>`;
+}
+
+// Cumulative cost vs the flock's sale value as it grows — the crossing is the day the batch turns a profit.
+function breakevenChart(M){
+  const W=640,H=260,L=52,R=16,T=16,B=32,base=H-B;
+  const cut=Math.min(Math.max(M.dayNow??0,0),M.cycleDays);
+  const dayOf=ms2=>{const dm=parse(ms2);const dd=dm!=null&&M.start!=null?Math.floor((dm-M.start)/DAY)+1:1;return Math.min(Math.max(dd,1),M.cycleDays)};
+  const spendBy=new Array(M.cycleDays+2).fill(0);
+  spendBy[1]+=M.chickCost+M.coop+M.other;
+  S.feed.forEach(f=>spendBy[dayOf(f.date)]+=num(f.bags)*num(f.costPerBag));
+  S.meds.forEach(m=>spendBy[dayOf(m.dateBought)]+=num(m.cost));
+  S.expenses.forEach(e=>spendBy[dayOf(e.date)]+=num(e.amount));
+  const cum=[];let r=0;for(let d=0;d<=M.cycleDays;d++){r+=d>=1?spendBy[d]:0;cum[d]=r}
+  const aliveAt=d=>d<=cut?(M.days[Math.max(0,d-1)]?.endAlive??M.flock):M.alive;
+  const value=d=>aliveAt(d)*targetAt(d,M)*M.price;
+  const saleVal=value(M.cycleDays),maxCost=cum[M.cycleDays];
+  const maxY=Math.max(saleVal,maxCost)*1.08||1;
+  const x=d=>L+d/M.cycleDays*(W-L-R), y=v=>T+(1-v/maxY)*(H-T-B);
+  // crossing day (first day value>=cost)
+  let cross=null;for(let d=1;d<=M.cycleDays;d++){if(value(d)>=cum[d]){cross=d;break}}
+  let cp="",cpP="",vp="",vpP="";
+  for(let d=0;d<=M.cycleDays;d++){const cmd=(d?"L":"M")+x(d).toFixed(1)+","+y(cum[d]).toFixed(1);if(d<=cut)cp+=cmd;else{if(!cpP)cpP="M"+x(Math.min(cut,d)).toFixed(1)+","+y(cum[Math.min(cut,M.cycleDays)]).toFixed(1);cpP+="L"+x(d).toFixed(1)+","+y(cum[d]).toFixed(1)}}
+  for(let d=0;d<=M.cycleDays;d++){const vmd=(d?"L":"M")+x(d).toFixed(1)+","+y(value(d)).toFixed(1);if(d<=cut)vp+=vmd;else{if(!vpP)vpP="M"+x(cut).toFixed(1)+","+y(value(cut)).toFixed(1);vpP+="L"+x(d).toFixed(1)+","+y(value(d)).toFixed(1)}}
+  let yt="";const stp=maxY/4;for(let i=0;i<=4;i++){const v=stp*i;yt+=`<line class="gridln soft" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-8}" y="${y(v)+3.5}" text-anchor="end">${v>=1000?k(Math.round(v/1000))+"k":k(v)}</text>`}
+  let xt="";[1,8,15,22,29,36,M.cycleDays].forEach(d=>xt+=`<text x="${x(d)}" y="${H-10}" text-anchor="middle">${d}</text>`);
+  const crossMark=cross!=null?`<line class="ref" x1="${x(cross)}" x2="${x(cross)}" y1="${T}" y2="${base}"/><circle cx="${x(cross).toFixed(1)}" cy="${y(value(cross)).toFixed(1)}" r="4" fill="var(--good)" stroke="var(--surface)" stroke-width="2"/><text x="${x(cross).toFixed(1)}" y="${T+2}" text-anchor="middle" class="lab" style="fill:var(--good);font-weight:600">break-even ≈ day ${cross}</text>`:"";
+  const today=cut>=1&&cut<=M.cycleDays?`<line class="todayln" x1="${x(cut)}" x2="${x(cut)}" y1="${T}" y2="${base}" stroke-opacity=".55"/>`:"";
+  const step=(W-L-R)/M.cycleDays;
+  const hits=[];for(let d=1;d<=M.cycleDays;d++){const prof=value(d)-cum[d];hits.push(`<rect class="hit" x="${(x(d)-step/2).toFixed(1)}" y="${T}" width="${step.toFixed(1)}" height="${base-T}" data-cx="${x(d).toFixed(1)}" data-cy="${y(cum[d]).toFixed(1)},${y(value(d)).toFixed(1)}" data-tip="${esc(`<b>Day ${d}</b>${d<=cut?"":" (projected)"}<br>${tk("Cost so far",k(cum[d])+" RWF")}<br>${tk("Flock value",k(value(d))+" RWF")}<br>${tk(prof>=0?"Ahead by":"Short by",k(Math.abs(prof))+" RWF")}`)}"/>`)}
+  return `<div class="tw"><svg class="chart" viewBox="0 0 ${W} ${H}" style="min-width:560px" role="img" aria-label="Cost against flock value by day"><defs><linearGradient id="gBE" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--good)" stop-opacity=".13"/><stop offset="1" stop-color="var(--good)" stop-opacity="0"/></linearGradient></defs>${yt}<path class="band" d="${vp}L${x(cut).toFixed(1)},${base} L${x(0).toFixed(1)},${base} Z" fill="url(#gBE)"/>${crossMark}${today}<path class="series" style="stroke:var(--good)" d="${vp}"/><path class="series" style="stroke:var(--good);stroke-dasharray:4 4" d="${vpP}"/><path class="series" style="stroke:var(--accent)" d="${cp}"/><path class="series" style="stroke:var(--accent);stroke-dasharray:4 4" d="${cpP}"/><line class="axis" x1="${L}" x2="${W-R}" y1="${base}" y2="${base}"/>${xt}<text x="${L}" y="${H}" class="lab" style="font-size:10px">day of cycle · RWF</text>${xhairG(T,base,2)}${hits.join("")}</svg></div>
+  <div class="legend"><span><i class="line" style="background:var(--accent)"></i>Money spent (cost)</span><span><i class="line" style="background:var(--good)"></i>Flock value if sold</span><span><i class="round" style="background:var(--good)"></i>Break-even day</span><span><i class="dash"></i>Projected to sale</span></div>`;
+}
+
+const CAUSE_COL=["var(--crit)","var(--warn)","var(--info)","var(--supp)","var(--accent)","var(--ink2)","var(--good)","var(--anti)"];
+// Deaths grouped by week, stacked by recorded cause.
+function deathsByWeekChart(M){
+  if(!M.deaths)return `<p class="muted">No deaths recorded. Log the cause of any death in the daily log and it will show here.</p>`;
+  const weeks=Math.ceil(M.cycleDays/7);
+  const data=[];for(let w=1;w<=weeks;w++)data.push({w,byCause:{},total:0});
+  M.days.forEach(d=>{if(d.deaths){const w=Math.ceil(d.day/7);const c=(d.rec&&d.rec.cause)||"Not recorded";const o=data[w-1];o.byCause[c]=(o.byCause[c]||0)+d.deaths;o.total+=d.deaths}});
+  const causeList=[...new Set(M.days.filter(d=>d.deaths).map(d=>(d.rec&&d.rec.cause)||"Not recorded"))];
+  const col=c=>c==="Not recorded"?"var(--muted)":CAUSE_COL[Math.max(0,causeList.filter(x=>x!=="Not recorded").indexOf(c))%CAUSE_COL.length];
+  const W=640,H=210,L=28,R=12,T=14,B=38,base=H-B;
+  const maxT=Math.max(1,...data.map(d=>d.total));
+  const bw=(W-L-R)/weeks,barW=Math.min(42,bw*0.6);
+  const x=w=>L+(w-0.5)*bw, y=v=>T+(1-v/maxT)*(H-T-B);
+  let yt="";for(let v=0;v<=maxT;v++){if(maxT>6&&v%2)continue;yt+=`<line class="gridln soft" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-6}" y="${y(v)+3.5}" text-anchor="end">${v}</text>`}
+  let bars="";data.forEach(d=>{let yy=base;const parts=Object.entries(d.byCause).sort((a,b)=>b[1]-a[1]);
+    parts.forEach(([c,n])=>{const h=(base-y(n))-(base-y(0));const hh=n/maxT*(H-T-B);yy-=hh;bars+=`<rect x="${(x(d.w)-barW/2).toFixed(1)}" y="${yy.toFixed(1)}" width="${barW.toFixed(1)}" height="${hh.toFixed(1)}" fill="${col(c)}" stroke="var(--surface)" stroke-width="1"/>`});
+    if(d.total)bars+=`<text class="barlab" x="${x(d.w).toFixed(1)}" y="${(yy-5).toFixed(1)}" text-anchor="middle">${d.total}</text>`;
+    const tip=d.total?parts.map(([c,n])=>`${c}: ${n}`).join("<br>"):"No deaths";
+    bars+=`<rect class="hit" x="${(x(d.w)-bw/2).toFixed(1)}" y="${T}" width="${bw.toFixed(1)}" height="${base-T}" data-tip="${esc(`<b>Week ${d.w}</b> · days ${(d.w-1)*7+1}–${Math.min(d.w*7,M.cycleDays)}<br>${tip}`)}"/>`;
+  });
+  let xt="";data.forEach(d=>xt+=`<text x="${x(d.w).toFixed(1)}" y="${H-20}" text-anchor="middle">wk ${d.w}</text>`);
+  const legend=causeList.map(c=>`<span><i class="sq" style="background:${col(c)}"></i>${esc(c)}</span>`).join("");
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Deaths by week and cause">${yt}${bars}<line class="axis" x1="${L}" x2="${W-R}" y1="${base}" y2="${base}"/>${xt}</svg>
+  <div class="legend">${legend}</div>`;
+}
+const TEMP_BANDS=[[32,35],[30,32],[27,29],[24,26],[21,24],[21,24],[21,24]];
+function tempBandChart(M){
+  const pts=M.days.filter(d=>d.rec&&d.rec.temp!=null&&d.rec.temp!=="").map(d=>({day:d.day,t:Number(d.rec.temp)})).filter(p=>Number.isFinite(p.t));
+  const W=640,H=220,L=36,R=14,T=14,B=34,base=H-B;
+  const lo=18,hi=37;
+  const x=d=>L+(d-1)/(M.cycleDays-1)*(W-L-R), y=v=>T+(hi-v)/(hi-lo)*(H-T-B);
+  const cut=Math.min(Math.max(M.dayNow??0,1),M.cycleDays);
+  // target band polygon: top edge left-to-right, bottom edge right-to-left
+  let bt="",bb=[];for(let d=1;d<=M.cycleDays;d++){const w=Math.ceil(d/7);const[bl,bh]=TEMP_BANDS[Math.min(w-1,TEMP_BANDS.length-1)];bt+=(d===1?"M":"L")+x(d).toFixed(1)+","+y(bh).toFixed(1);bb.push([x(d),y(bl)])}
+  const bandPath=bt+bb.reverse().map(p=>`L${p[0].toFixed(1)},${p[1].toFixed(1)}`).join("")+" Z";
+  let yt="";[20,24,28,32,36].forEach(v=>yt+=`<line class="gridln soft" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-6}" y="${y(v)+3.5}" text-anchor="end">${v}</text>`);
+  let xt="";[1,8,15,22,29,36,M.cycleDays].forEach(d=>xt+=`<text x="${x(d).toFixed(1)}" y="${H-18}" text-anchor="middle">${d}</text>`);
+  let lp="";pts.forEach((p,i)=>lp+=(i?"L":"M")+x(p.day).toFixed(1)+","+y(p.t).toFixed(1));
+  const dots=pts.map(p=>{const w=Math.ceil(p.day/7);const[bl,bh]=TEMP_BANDS[Math.min(w-1,TEMP_BANDS.length-1)];const inb=p.t>=bl&&p.t<=bh;return `<circle cx="${x(p.day).toFixed(1)}" cy="${y(p.t).toFixed(1)}" r="3.5" fill="var(${inb?"--good":"--crit"})" stroke="var(--surface)" stroke-width="1.5"/><rect class="hit" x="${(x(p.day)-8).toFixed(1)}" y="${T}" width="16" height="${base-T}" data-tip="${esc(`<b>Day ${p.day}</b><br>${tk("Room heat",p.t+" °C")}<br>${tk("Aim",bl+"–"+bh+" °C")} · ${inb?'<b style="color:var(--good)">in range</b>':p.t<bl?'<b style="color:var(--crit)">too cold</b>':'<b style="color:var(--crit)">too hot</b>'}`)}"/>`}).join("");
+  const today=cut>=1&&cut<=M.cycleDays?`<line class="todayln" x1="${x(cut)}" x2="${x(cut)}" y1="${T}" y2="${base}" stroke-opacity=".5"/>`:"";
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Room temperature against the brooding target band">${yt}<path d="${bandPath}" fill="var(--good)" opacity=".13"/>${today}<path class="series" style="stroke:var(--ink)" d="${lp}"/>${dots}<line class="axis" x1="${L}" x2="${W-R}" y1="${base}" y2="${base}"/>${xt}<text x="${L}" y="${H}" class="lab" style="font-size:10px">day of cycle · °C</text></svg>
+  <div class="legend"><span><i class="sq" style="background:var(--good);opacity:.4"></i>Target heat band</span><span><i class="round" style="background:var(--good)"></i>In range</span><span><i class="round" style="background:var(--crit)"></i>Out of range</span></div>
+  ${pts.length?"":`<p class="muted" style="font-size:.8rem;margin:8px 0 0">No room temperatures logged yet. Add the reading when you log a day and it will plot against the target band.</p>`}`;
+}
+// Grouped bars: cost vs revenue per cycle, for the year view.
+function cycleCompareChart(rows){
+  if(!rows.length)return `<p class="muted">No cycles to compare yet. Close this cycle when it is sold, or add past cycles.</p>`;
+  const W=640,H=250,L=46,R=12,T=16,B=46,base=H-B;
+  const maxV=Math.max(1,...rows.map(r=>Math.max(r.cost,r.revenue)))*1.12;
+  const n=rows.length,gw=(W-L-R)/n;
+  const y=v=>T+(1-v/maxV)*(H-T-B);
+  const bw=Math.min(30,gw*0.3);
+  let yt="";for(let i=0;i<=4;i++){const v=maxV/4*i;yt+=`<line class="gridln soft" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-6}" y="${y(v)+3.5}" text-anchor="end">${v>=1000?k(Math.round(v/1000))+"k":k(v)}</text>`}
+  let bars="";rows.forEach((r,i)=>{const cx=L+(i+0.5)*gw;const profit=r.revenue-r.cost;
+    bars+=`<rect x="${(cx-bw-2).toFixed(1)}" y="${y(r.cost).toFixed(1)}" width="${bw.toFixed(1)}" height="${(base-y(r.cost)).toFixed(1)}" rx="2" fill="var(--accent)"/>`;
+    bars+=`<rect x="${(cx+2).toFixed(1)}" y="${y(r.revenue).toFixed(1)}" width="${bw.toFixed(1)}" height="${(base-y(r.revenue)).toFixed(1)}" rx="2" fill="var(--good)"/>`;
+    const lbl=String(r.cycle).replace(/^Cycle /,"C");
+    const topY=Math.min(y(r.cost),y(r.revenue))-6;
+    bars+=`<text class="barlab" x="${cx.toFixed(1)}" y="${topY.toFixed(1)}" text-anchor="middle" style="fill:var(${profit<0?"--crit":"--good"});font-weight:700">${k(profit)}</text>`;
+    bars+=`<text x="${cx.toFixed(1)}" y="${H-12}" text-anchor="middle">${esc(lbl)}</text>`;
+    bars+=`<rect class="hit" x="${(cx-gw/2).toFixed(1)}" y="${T}" width="${gw.toFixed(1)}" height="${base-T}" data-tip="${esc(`<b>${r.cycle}</b>${r.live?" (projected)":""}<br>${tk("Cost",k(r.cost)+" RWF")}<br>${tk("Revenue",k(r.revenue)+" RWF")}<br>${tk(profit<0?"Loss":"Profit",k(profit)+" RWF")}`)}"/>`;
+  });
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Cost and revenue by cycle">${yt}${bars}<line class="axis" x1="${L}" x2="${W-R}" y1="${base}" y2="${base}"/><text x="${L}" y="${H}" class="lab" style="font-size:10px">profit shown above each pair · RWF</text></svg>
+  <div class="legend"><span><i class="sq" style="background:var(--accent)"></i>Cost</span><span><i class="sq" style="background:var(--good)"></i>Revenue</span></div>`;
+}
+function vGrowth(M){
+  if(!S.setup)return emptyState();
+  const last=M.weighins[M.weighins.length-1];
+  const rows=[...M.weighins].reverse().map(w=>{const t=targetAt(w.day,M);return `<tr class="${canWrite?"click":""}" data-edit="weighins" data-id="${esc(w._id)}"><td class="mono">${fd(parse(w.date),1)}</td><td class="n">${w.day}</td><td class="n">${w.birds}</td><td class="n">${num(w.totalKg).toFixed(2)}</td><td class="n"><b>${w.avg.toFixed(2)}</b></td><td class="n">${t.toFixed(2)}</td><td class="n">${w.feedLeftKg!=null&&w.feedLeftKg!==""?k(num(w.feedLeftKg)):"—"}</td><td class="n">${w.fcr?w.fcr.toFixed(2):"—"}</td><td class="note">${esc(w.notes||"")}</td></tr>`}).join("");
+  const fcrS=M.fcr==null?"neutral":M.fcr<=1.8?"good":M.fcr<=2.2?"warn":"crit";
+  return `
+  <div class="vhead"><div><h2>Growth & feed conversion</h2><p>Once a week, weigh 5–10 birds picked at random and enter their total weight. Note how much feed is left in store the same day, and the site works out the feed conversion ratio (FCR): kilograms of feed eaten for each kilogram of live weight gained. Lower is better.</p></div><span class="spacer"></span>${canWrite?`<button class="btn pri" type="button" data-add="weighins">Add a weigh-in</button>`:""}</div>
+  <div class="hero">
+    <div><div class="eyebrow">Latest average weight</div><div class="big">${last?last.avg.toFixed(2):"—"}<small> kg</small></div><div class="sub">${last?`Day ${last.day} · target path ${targetAt(last.day,M).toFixed(2)} kg`:"No weigh-ins yet"}</div></div>
+    <div><div class="eyebrow">Feed conversion (FCR)</div><div class="mid">${M.fcr!=null?M.fcr.toFixed(2):"—"}</div><div class="sub">${M.fcr!=null?`<span class="chip ${fcrS}">${M.fcrFinal?"Final":"Latest"}</span> kg feed per kg gained`:"Needs a weigh-in with feed left in store"}</div></div>
+    <div><div class="eyebrow">Cost per kg live weight</div><div class="mid">${M.costPerKg?k(M.costPerKg):"—"}</div><div class="sub">RWF${M.costPerKg?` · you sell at ${k(M.price)} RWF/kg`:""}</div></div>
+    <div><div class="eyebrow">Efficiency factor (EPEF)</div><div class="mid">${M.epef?Math.round(M.epef):"—"}</div><div class="sub">survival × weight ÷ (age × FCR) × 100</div></div>
+  </div>
+  <section class="panel"><h3>Weight against the target path</h3>${M.weighins.length?growthChart(M):`<div class="empty">No weigh-ins yet. Weigh 5–10 birds in a bucket or bag on a kitchen or hanging scale, take away the bucket's weight, and add it here.</div>`}
+    <p class="muted" style="font-size:.78rem;margin:10px 0 0">The target path follows the growth curve shape published for Ross 308 broilers, scaled down so it ends at your target of ${num(M.st.targetWeight)||2} kg on day ${M.cycleDays}. Under ideal commercial conditions that breed reaches about 3.3 kg by day 45.</p></section>
+  <section class="panel"><h3>Weigh-ins</h3><div class="tw"><table><thead><tr><th>Date</th><th class="n">Day</th><th class="n">Birds weighed</th><th class="n">Total kg</th><th class="n">Average kg</th><th class="n">Target kg</th><th class="n">Feed left (kg)</th><th class="n">FCR</th><th>Notes</th></tr></thead><tbody>${rows||'<tr><td colspan="9" class="muted">No weigh-ins yet.</td></tr>'}</tbody></table></div>
+  <p class="muted" style="font-size:.78rem;margin:10px 0 0">FCR = feed used ÷ (live weight now + weight already sold − chick weight at arrival). Feed used = feed bought up to that day − feed left in store. Chicks are counted at about 44 g each on arrival.</p></section>`;
+}
+
+/* ---------- expenses ---------- */
+const EXP_CATS=["Labour","Transport","Heating and charcoal","Bedding","Cleaning and disinfection","Water and electricity","Vet visits","Equipment and repairs","Other"];
+function vExpenses(M){
+  if(!S.setup)return emptyState();
+  const rows=[...S.expenses].sort((a,b)=>(parse(b.date)??0)-(parse(a.date)??0));
+  const byCat={};rows.forEach(e=>{const c=e.category||"Other";byCat[c]=(byCat[c]||0)+num(e.amount)});
+  const mx=Math.max(1,...Object.values(byCat));
+  return `
+  <div class="vhead"><div><h2>Expenses</h2><p>Every cost that is not chicks, feed, medicine or materials: the maid's pay, transport, charcoal refills, vet visits, water and repairs. Each one has its own date, so the cycle cost is exact.</p></div><span class="spacer"></span>${canWrite?`<button class="btn pri" type="button" data-add="expenses">Add expense</button>`:""}</div>
+  ${M.other&&canWrite?`<div class="panel" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:220px">Setup still holds <b>${rwf(M.other)}</b> as "other costs". Move it into this book so it is not counted twice.</span><button class="btn" type="button" data-act="moveOther">Move it here</button></div>`:""}
+  <div class="grid2">
+  <section class="panel"><h3>All expenses<span class="spacer"></span><span class="mono">${rwf(M.expTotal)}</span></h3><div class="tw"><table><thead><tr><th>Date</th><th>Category</th><th>What for</th><th>Paid to</th><th class="n">Amount (RWF)</th></tr></thead><tbody>
+  ${rows.map(e=>`<tr class="${canWrite?"click":""}" data-edit="expenses" data-id="${esc(e._id)}"><td class="mono">${fd(parse(e.date),1)}</td><td>${esc(e.category)}</td><td>${esc(e.text||"")}${e.notes?`<div class="muted" style="font-size:.76rem">${esc(e.notes)}</div>`:""}</td><td>${esc(e.paidTo||"")}</td><td class="n">${k(num(e.amount))}</td></tr>`).join("")||'<tr><td colspan="5" class="muted">No expenses yet.</td></tr>'}
+  </tbody><tfoot><tr class="tot"><td colspan="4">Total</td><td class="n">${k(M.expTotal)}</td></tr></tfoot></table></div></section>
+  <section class="panel"><h3>By category</h3><div class="hbar">${Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<span>${esc(c)}</span><span class="tr"><i style="width:${(v/mx*100).toFixed(1)}%"></i></span><span class="v">${k(v)}</span>`).join("")||'<span class="muted">Nothing yet.</span>'}</div>
+  <div class="kv" style="margin-top:14px"><div>Expenses per live bird</div><div>${M.alive?k(M.expTotal/M.alive):"—"} RWF</div><div>Share of total cost</div><div>${M.totalCost?pct(M.expTotal/M.totalCost):"—"}</div></div></section></div>`;
+}
+
+/* ---------- sales & buyers ---------- */
+function vSales(M){
+  if(!S.setup)return emptyState();
+  const rows=[...S.sales].sort((a,b)=>(parse(b.date)??0)-(parse(a.date)??0));
+  const agg={};S.sales.forEach(s=>{const n=(s.buyer||"Walk-in").trim()||"Walk-in";const a=agg[n]=agg[n]||{birds:0,kg:0,amt:0,paid:0,n:0};a.birds+=num(s.birds);a.kg+=num(s.kg);a.amt+=saleAmt(s);a.paid+=num(s.paid);a.n++});
+  S.buyers.forEach(b=>{agg[b.name]=agg[b.name]||{birds:0,kg:0,amt:0,paid:0,n:0}});
+  const buyerRows=Object.entries(agg).sort((a,b)=>b[1].amt-a[1].amt).map(([n,a])=>{const b=S.buyers.find(x=>x.name===n);const owed=a.amt-a.paid;return `<tr class="${canWrite&&b?"click":""}" ${b?`data-edit="buyers" data-id="${esc(b._id)}"`:""}><td><b>${esc(n)}</b>${b&&(b.phone||b.place)?`<div class="muted" style="font-size:.76rem">${esc([b.phone,b.place].filter(Boolean).join(" · "))}</div>`:""}${b?.notes?`<div class="muted" style="font-size:.76rem">${esc(b.notes)}</div>`:""}</td><td class="n">${a.n}</td><td class="n">${a.birds}</td><td class="n">${a.kg?a.kg.toFixed(1):"—"}</td><td class="n">${k(a.amt)}</td><td class="n">${owed>0?`<span class="dz">${k(owed)}</span>`:"0"}</td></tr>`}).join("");
+  return `
+  <div class="vhead"><div><h2>Sales & buyers</h2><p>Record each sale as it happens: who bought, how many birds, the total live weight, the price and what has been paid. The money page then uses what you actually earned, and anything still owed shows here.</p></div><span class="spacer"></span>${canWrite?`<button class="btn" type="button" data-add="buyers">Add buyer</button><button class="btn pri" type="button" data-add="sales">Record a sale</button>`:""}</div>
+  <div class="hero">
+    <div><div class="eyebrow">Birds sold</div><div class="big">${M.soldBirds}<small> of ${M.alive}</small></div><div class="sub">${M.onHand} still on hand</div></div>
+    <div><div class="eyebrow">Sold so far</div><div class="mid">${k(M.salesAmt)}</div><div class="sub">RWF · ${M.soldKg?M.soldKg.toFixed(1)+" kg":"no weight yet"}</div></div>
+    <div><div class="eyebrow">Average sale</div><div class="mid">${M.soldKg?k(M.salesAmt/M.soldKg):"—"}</div><div class="sub">${M.soldKg?`RWF per kg · ${(M.soldKg/M.soldBirds).toFixed(2)} kg per bird`:"RWF per kg"}</div></div>
+    <div><div class="eyebrow">Still owed to you</div><div class="mid" style="color:var(${M.owed>0?"--crit":"--ink"})">${k(M.owed)}</div><div class="sub">RWF · ${M.salesPaid?k(M.salesPaid)+" received":"nothing received yet"}</div></div>
+  </div>
+  <section class="panel"><h3>Sales</h3><div class="tw"><table><thead><tr><th>Date</th><th>Buyer</th><th class="n">Birds</th><th class="n">Live kg</th><th class="n">kg/bird</th><th class="n">RWF/kg</th><th class="n">Amount</th><th class="n">Paid</th><th>Status</th></tr></thead><tbody>
+  ${rows.map(s=>{const a=saleAmt(s),p=num(s.paid);return `<tr class="${canWrite?"click":""}" data-edit="sales" data-id="${esc(s._id)}"><td class="mono">${fd(parse(s.date),1)}</td><td>${esc(s.buyer||"Walk-in")}${s.notes?`<div class="muted" style="font-size:.76rem">${esc(s.notes)}</div>`:""}</td><td class="n">${num(s.birds)}</td><td class="n">${num(s.kg)?num(s.kg).toFixed(1):"—"}</td><td class="n">${num(s.kg)&&num(s.birds)?(num(s.kg)/num(s.birds)).toFixed(2):"—"}</td><td class="n">${k(num(s.pricePerKg))}</td><td class="n">${k(a)}</td><td class="n">${k(p)}</td><td>${p>=a&&a>0?'<span class="chip good">Paid</span>':p>0?'<span class="chip warn">Part paid</span>':'<span class="chip crit">Owed</span>'}</td></tr>`}).join("")||'<tr><td colspan="9" class="muted">No sales yet. The planned sale is '+fd(M.saleMs,1)+'.</td></tr>'}
+  </tbody>${rows.length?`<tfoot><tr class="tot"><td colspan="2">Total</td><td class="n">${M.soldBirds}</td><td class="n">${M.soldKg.toFixed(1)}</td><td></td><td></td><td class="n">${k(M.salesAmt)}</td><td class="n">${k(M.salesPaid)}</td><td></td></tr></tfoot>`:""}</table></div></section>
+  <section class="panel"><h3>Buyers</h3><div class="tw"><table><thead><tr><th>Buyer</th><th class="n">Sales</th><th class="n">Birds</th><th class="n">kg</th><th class="n">Amount (RWF)</th><th class="n">Owes (RWF)</th></tr></thead><tbody>${buyerRows||'<tr><td colspan="6" class="muted">No buyers yet. Add the people and shops you sell to, with a phone number.</td></tr>'}</tbody></table></div>
+  <p class="muted" style="font-size:.8rem;margin:10px 0 0">Selling tips from your notes: state your price first, keep regular buyers happy with steady quality, do not panic-sell, and never sell swollen or sick birds or birds still inside a medicine withdrawal period (safe after ${M.latestSafe!=null?fd(M.latestSafe,1):"—"}).</p></section>`;
+}
+function saleAmt(s){return num(s.amount)||num(s.kg)*num(s.pricePerKg)}
+
+/* ---------- vaccination ---------- */
+const VAX_TEMPLATE=[
+ [1,"Infectious bronchitis + Newcastle","IB + ND (e.g. Nobilis ND C2)","Coarse spray at the hatchery","Usually done before the chicks leave the hatchery. Ask the chick seller if it was given."],
+ [10,"Infectious bronchitis + Newcastle","IB Ma5 + ND Clone 30","Drinking water or spray",""],
+ [14,"Gumboro (IBD)","Gumboro D78","Drinking water",""],
+ [19,"Gumboro (IBD)","Gumboro D78","Drinking water","Second Gumboro dose"],
+ [21,"Newcastle","ND Clone 30","Drinking water",""],
+ [28,"Newcastle","ND Clone 30","Drinking water","Only if birds are kept past 42 days"]];
+function vaxSection(M){
+  const rows=M.vax.map(v=>{const due=M.start!=null?M.start+(num(v.day)-1)*DAY:null;const st=v.status||"Planned";const late=st==="Planned"&&M.dayNow!=null&&num(v.day)<M.dayNow;const chip=st==="Given"?"good":st==="Skipped"||st==="Not recorded"?"neutral":late?"crit":num(v.day)<=(M.dayNow??0)+1?"warn":"info";
+    return `<tr class="${canWrite?"click":""}" data-edit="vaccines" data-id="${esc(v._id)}"><td class="n">${num(v.day)}</td><td class="mono">${fd(due,1)}</td><td><b>${esc(v.disease)}</b><div class="muted" style="font-size:.76rem">${esc(v.vaccine||"")}</div></td><td>${esc(v.route||"")}</td><td><span class="chip ${chip}">${late?"Overdue":esc(st)}</span>${v.dateGiven?`<div class="muted mono" style="font-size:.76rem">given ${fd(parse(v.dateGiven))}</div>`:""}</td><td class="note">${esc(v.notes||"")}</td>${canWrite&&st==="Planned"?`<td><button type="button" class="btn sm" data-vaxgiven="${esc(v._id)}">Given today</button></td>`:"<td></td>"}</tr>`}).join("");
+  return `<section class="panel"><h3>Vaccination plan<span class="spacer"></span>${canWrite?`${!M.vax.length?`<button class="btn sm" type="button" data-act="loadVax">Load a common broiler plan</button>`:""}<button class="btn sm" type="button" data-add="vaccines">Add vaccination</button>`:""}</h3>
+  <div class="tw"><table><thead><tr><th class="n">Day</th><th>Date</th><th>Disease and vaccine</th><th>How</th><th>Status</th><th>Notes</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="muted">No vaccinations planned. Load the common plan and confirm it with the RAB office or a vet, or add your own.</td></tr>'}</tbody></table></div>
+  <div class="prose" style="margin-top:12px"><p style="margin:0 0 6px;font-size:.84rem"><b>Giving a vaccine in drinking water</b></p><ul style="font-size:.84rem;margin:0">
+  <li>Work out how much water the birds drink in about 2 hours and mix the vaccine into only that amount.</li>
+  <li>Hold back water for about 1–1¾ hours beforehand so they drink it quickly.</li>
+  <li>Use water without chlorine, and no medicine, vitamins or disinfectant in it that day.</li>
+  <li>Make sure it is drunk within 2 hours, then throw away what is left.</li>
+  <li>Vaccinate only healthy birds: wait until sneezing has stopped and the room is dry.</li></ul>
+  <p class="muted" style="font-size:.76rem;margin:8px 0 0">The common plan follows MSD Animal Health's broiler vaccination guideline for normal disease pressure. Confirm the vaccines and days used in your area with the RAB office or a vet before following it.</p></div></section>`;
+}
+
+/* ---------- investor report ---------- */
+function vReport(M){
+  if(!S.setup)return emptyState();
+  const st=M.st;const done=M.onHand===0&&M.soldBirds>0;
+  const inv=num(st.investorAmount), share=num(st.investorSharePct);
+  const firstPh=S.photos.filter(p=>p.kind==="day").sort((a,b)=>num(a.day)-num(b.day))[0];
+  const lastPh=S.photos.filter(p=>p.kind==="day").sort((a,b)=>num(b.day)-num(a.day))[0];
+  const last=M.weighins[M.weighins.length-1];
+  const avgW=done&&M.soldKg?M.soldKg/M.soldBirds:(last?last.avg:(M.soldKg?M.soldKg/M.soldBirds:null));
+  const costs=[["Chicks",M.chickCost],["Feed",M.feedCost],["Medicine and vitamins",M.medCost],["Materials and equipment share",M.coop],["Expenses",M.expTotal],["Other costs",M.other]].filter(c=>c[1]);
+  const payout=inv?(M.profit>=0?inv+M.profit*share/100:null):null;
+  const vaxGiven=M.vax.filter(v=>v.status==="Given").length;
+  const antiCourses=M.doses.filter(d=>d.anti).length;
+  return `
+  <div class="vhead"><div><h2>Investor report</h2><p>A one-page summary of this cycle to share. Download it as a file to send to your investor.</p></div><span class="spacer"></span><button class="btn pri" type="button" data-act="dlReport">Download report</button></div>
+  <article class="report" id="reportDoc">
+    <header class="rhead"><div class="rbrand">${brandMark()}<div style="min-width:0"><div class="eyebrow">Broiler cycle report</div><h2 class="rfarm">${esc(st.farmName||"Broiler Flock Ledger")}</h2>
+      <p class="rmeta">${esc(st.cycleName||"Cycle")} · ${M.flock} broilers · ${fd(M.start,1)} to ${fd(M.saleMs,1)} ${new Date(M.start).getUTCFullYear()}</p></div></div>
+      <div class="rstatus"><span class="chip ${done?"good":"info"}">${done?"Completed":`In progress · day ${Math.min(M.dayNow,M.cycleDays)} of ${M.cycleDays}`}</span><div class="muted" style="font-size:.78rem;margin-top:6px">Prepared ${fd(M.today,1)} ${new Date(M.today).getUTCFullYear()}</div></div></header>
+    <div class="rsummary">${done?"This cycle made":"On track for"} a ${done?"":"projected "}profit of <b>${rwf(M.profit)}</b>${M.revenue?` at a <b>${pct(M.profit/M.revenue,0)}</b> margin`:""}, from <b>${M.flock}</b> broilers with <b>${pct(1-M.mortality)}</b> surviving${M.latestSafe!=null&&M.saleMs!=null?`. All medicine clears ${M.latestSafe>M.saleMs?`<b style="color:var(--crit)">after</b> the planned sale`:`before the planned sale on ${fd(M.saleMs,1)}`}`:""}.</div>
+    <div class="rkpi">
+      ${[["Birds placed",M.flock,""],["Survival",pct(1-M.mortality),`${M.deaths} lost`],["Average weight",avgW?avgW.toFixed(2)+" kg":"—",done&&M.soldKg?"at sale":last?`day ${last.day} weigh-in`:M.soldKg?"birds sold so far":"not weighed yet"],["Feed conversion",M.fcr!=null?M.fcr.toFixed(2):"—","kg feed per kg gained"],
+         ["Total cost",k(M.totalCost),"RWF"],[done?"Revenue":"Revenue (expected)",k(M.revenue),M.salesAmt?`RWF · ${k(M.salesAmt)} already sold`:"RWF"],[done?"Profit":"Profit (expected)",k(M.profit),"RWF · margin "+(M.revenue?pct(M.profit/M.revenue,0):"—")],["Cost per kg",M.costPerKg?k(M.costPerKg):"—","RWF of live weight"]]
+        .map(([l,v,s])=>`<div><div class="eyebrow">${l}</div><div class="mid">${v}</div><div class="sub">${s}</div></div>`).join("")}
+    </div>
+    ${inv?`<section class="rsec"><h3>Investment</h3><div class="kv"><div>Amount invested</div><div>${rwf(inv)}</div><div>Agreed share of profit</div><div>${share}%</div><div>Capital returned first</div><div>${rwf(inv)}</div><div>Share of ${done?"":"expected "}profit</div><div>${M.profit>=0?rwf(M.profit*share/100):"No profit to share"}</div><div class="em">${done?"Total payout":"Expected total payout"}</div><div class="em">${payout!=null?rwf(payout):"—"}</div><div>Return on investment</div><div>${payout!=null?pct((payout-inv)/inv):"—"}</div></div></section>`:""}
+    <div class="grid2">
+      <section class="rsec"><h3>Flock survival</h3>${flockChart(M)}</section>
+      <section class="rsec"><h3>Growth vs target</h3>${M.weighins.length?growthChart(M):'<div class="empty" style="padding:18px">Weigh-ins will appear here as the birds are weighed.</div>'}</section>
+    </div>
+    <section class="rsec"><h3>Cost against flock value</h3>${breakevenChart(M)}</section>
+    <div class="grid2">
+      <section class="rsec"><h3>Where the money went</h3>${donut(costs.map(([l,v])=>({label:l,value:v,color:COSTCOL[l]||"var(--muted)"})),k(Math.round(M.totalCost/1000))+"k","RWF total")}
+        <div class="kv" style="margin-top:12px">${costs.map(([l,v])=>`<div>${l}</div><div>${k(v)}</div>`).join("")}<div class="em">Total</div><div class="em">${rwf(M.totalCost)}</div></div></section>
+      <section class="rsec"><h3>Health</h3><div class="kv"><div>Death rate</div><div>${pct(M.mortality)}</div><div>Antibiotic courses</div><div>${antiCourses}</div><div>Vaccinations given</div><div>${vaxGiven}${M.vax.length?` of ${M.vax.length}`:""}</div><div>Safe to sell after</div><div>${M.latestSafe!=null?fd(M.latestSafe,1):"No wait"}</div><div>Withdrawal before sale date</div><div>${M.latestSafe==null||M.latestSafe<=M.saleMs?"Yes":"No"}</div></div></section>
+    </div>
+    ${M.soldBirds?`<section class="rsec"><h3>Sales</h3><div class="kv"><div>Birds sold</div><div>${M.soldBirds}</div><div>Live weight sold</div><div>${M.soldKg.toFixed(1)} kg</div><div>Average price</div><div>${M.soldKg?k(M.salesAmt/M.soldKg):"—"} RWF/kg</div><div>Received</div><div>${rwf(M.salesPaid)}</div><div>Still owed</div><div>${rwf(M.owed)}</div></div></section>`:""}
+    ${firstPh&&lastPh&&firstPh!==lastPh?`<section class="rsec"><h3>From arrival to now</h3><div class="compare"><figure><img src="${blob(firstPh.assetId)}" alt="Day ${firstPh.day}"><figcaption>Day ${firstPh.day}</figcaption></figure><figure><img src="${blob(lastPh.assetId)}" alt="Day ${lastPh.day}"><figcaption>Day ${lastPh.day}</figcaption></figure></div></section>`:""}
+    ${st.reportMessage?`<section class="rsec"><h3>Notes from the farm</h3><p class="ink2" style="white-space:pre-wrap;margin:0">${esc(st.reportMessage)}</p></section>`:""}
+    <div class="rfoot"><span class="muted" style="font-size:.76rem;max-width:62ch">${done?"All figures are final.":"Figures marked expected use the target weight of "+M.weight+" kg and "+k(M.price)+" RWF/kg for birds not yet sold."} Feed conversion uses weigh-ins of a sample of birds.</span><span class="eyebrow">${esc(st.farmName||"Broiler Flock Ledger")}</span></div>
+  </article>
+  ${canWrite?`<section class="panel"><h3>Report settings</h3><div class="fgrid">
+    <div class="field"><label for="rp_farmName">Farm name</label><input type="text" id="rp_farmName" value="${esc(st.farmName||"")}" placeholder="Shown at the top of the report"></div>
+    <div class="field"><label for="rp_investorAmount">Amount invested (RWF)</label><input type="number" id="rp_investorAmount" value="${esc(st.investorAmount??"")}"></div>
+    <div class="field"><label for="rp_investorSharePct">Investor's share of profit (%)</label><input type="number" id="rp_investorSharePct" value="${esc(st.investorSharePct??"")}" placeholder="e.g. 50"><span class="hint">Capital is paid back first, then this share of the profit</span></div>
+    <div class="field wide"><label for="rp_reportMessage">Notes from the farm</label><textarea id="rp_reportMessage" placeholder="What went well, what you changed, what comes next">${esc(st.reportMessage||"")}</textarea></div></div>
+    <div style="margin-top:12px"><button class="btn pri" type="button" data-act="saveReport">Save report settings</button></div></section>`:""}`;
+}
+
+function vSetup(M){
+  const st=S.setup||{};
+  const f=(id,l,type,hint,attrs="")=>`<div class="field"><label for="su_${id}">${l}</label><input type="${type}" id="su_${id}" value="${esc(st[id]??"")}" ${attrs} ${canWrite?"":"disabled"}>${hint?`<span class="hint">${hint}</span>`:""}</div>`;
+  return `
+  <div class="vhead"><div><h2>Setup</h2><p>The numbers every other page is calculated from. Change them here and everything updates.</p></div></div>
+  <section class="panel"><div class="fgrid">
+    ${f("cycleName","Cycle name","text","")}
+    ${f("startDate","Start date","date","The day the chicks arrived")}
+    ${f("cycleDays","Cycle length (days)","number","Day 45 is the planned sale","min=\"20\" max=\"120\"")}
+    ${f("chicks","Chicks bought","number","")}
+    ${f("bonusChicks","Free or bonus chicks","number","Counted as birds, not as cost")}
+    ${f("pricePerChick","Price per chick (RWF)","number","")}
+    ${f("targetWeight","Target sale weight (kg per bird)","number","Realistic about 1.8, aiming for 2","step=\"0.05\"")}
+    ${f("actualWeight","Actual average weight at sale (kg)","number","Leave empty until you weigh at sale","step=\"0.01\"")}
+    ${f("salePrice","Expected sale price (RWF per kg)","number","")}
+    ${f("priceLow","Lowest market price seen (RWF/kg)","number","")}
+    ${f("priceHigh","Highest market price seen (RWF/kg)","number","")}
+    ${f("otherCosts","Other costs: cleaning, transport (RWF)","number","")}
+    ${f("coopShare","Coop and equipment share this cycle (RWF)","number","Shavings, charcoal, drinkers")}
+    <div class="field wide"><label for="su_notes">Notes</label><textarea id="su_notes" ${canWrite?"":"disabled"}>${esc(st.notes||"")}</textarea></div>
+  </div>${canWrite?`<div style="margin-top:14px"><button class="btn pri" type="button" data-act="saveSetup">Save setup</button></div>`:""}</section>
+  ${dataChecks(M)}`;
+}
+// Known data questions from the brief — surfaced for the farmer to confirm, never changed automatically.
+function dataChecks(M){
+  const checks=[];
+  const ms=S.meds.find(m=>/multi.?sol|multi.?aminovet|aminovet/i.test(m.name||""));
+  if(ms&&num(ms.rateMin)>=0.9)checks.push([`The packet labelled "${esc(ms.name)}"`,`If your packet is <b>Multi-Aminovet</b>, the label reads 100 g per 200 L, which is <b>0.5 g per litre</b> for 3–5 days, not the 1 g/L set here. Check the packet and fix the rate in the medicine list.`,"health","Open Health & medicine"]);
+  const enro=M.doses.find(d=>/enrosol/i.test(d.product||"")&&(num(d.timesPerDay)||1)===1);
+  if(enro)checks.push(["Enrosol-S: how many times a day?",`Your earlier spreadsheet said Enrosol-S was given <b>5 times a day</b>, but a dose here is set to <b>1</b>. Confirm which is right and edit the dose if it is wrong.`,"health","Open Health & medicine"]);
+  const noPrice=S.materials.filter(m=>/(drinker|syringe)/i.test(m.name||"")&&!num(m.unitCost));
+  if(noPrice.length)checks.push(["Some equipment has no price yet",`${noPrice.map(m=>"<b>"+esc(m.name)+"</b>").join(", ")} ${noPrice.length===1?"has":"have"} no price. Add what you paid so the cost totals are complete.`,"materials","Open Materials"]);
+  checks.push(["Which sale price should the plan use?",`Setup uses <b>${k(num(M.st.salePrice))} RWF/kg</b>. Some earlier estimates used 4,800. Set the figure you really expect so the profit numbers match.`,null,null]);
+  if(!checks.length)return"";
+  return `<section class="panel"><h3>Things to double-check <span class="chip warn">${checks.length}</span></h3>
+    <p class="muted" style="margin:-4px 0 12px;max-width:68ch">A few numbers in your records differ from your earlier notes. Nothing here is changed for you — read each one and fix it only if it is wrong.</p>
+    <div class="alerts">${checks.map(([t,p,tab,lbl])=>`<div class="alert"><span class="chip warn">Check</span><b>${t}</b><p>${p}${tab?` <button type="button" class="btn ghost sm" data-go="${tab}" style="padding:0 2px;vertical-align:baseline">${lbl} ›</button>`:""}</p></div>`).join("")}</div></section>`;
+}
+
+function emptyState(){
+  return `<div class="empty"><h3>No flock set up yet</h3><p>Enter the start date and chick numbers to begin.</p>${canWrite?`<button class="btn pri" type="button" data-go="setup">Open Setup</button>`:""}</div>`;
+}
+
+/* ---------- render ---------- */
+function render(){
+  const M=derive();
+  renderTop(M);
+  const v={overview:vOverview,daily:vDaily,growth:vGrowth,expenses:vExpenses,sales:vSales,report:vReport,photos:vPhotos,materials:vMaterials,health:vHealth,feed:vFeed,money:vMoney,tasks:vTasks,year:vYear,guide:vGuide,setup:vSetup}[tab];
+  const active=document.activeElement, aid=active&&active.id, sel=active&&active.selectionStart;
+  $("#view").innerHTML=v(M);
+  const mp=document.getElementById("mPhotos");if(mp&&modalDay&&$("#dlg").open&&!mp.contains(document.activeElement))mp.innerHTML=dayPhotoPanel(modalDay);
+  if(aid){const el=document.getElementById(aid);if(el){el.focus();try{if(sel!=null)el.setSelectionRange(sel,sel)}catch(e){}}}
+}
+let rq=0;function schedule(){if(rq)return;rq=requestAnimationFrame(()=>{rq=0;render()})}
+
+/* ---------- forms ---------- */
+const FORMS={
+  feed:{title:"Feed purchase",fields:[["date","Date","date"],["type","Feed type","select",["Pre-starter","Starter","Grower","Finisher"]],["bags","Bags bought","number"],["kgPerBag","kg per bag","number"],["costPerBag","Cost per bag (RWF)","number"],["notes","Notes","text"]]},
+  meds:{title:"Medicine or supplement",fields:[["name","Product name","text"],["type","Type","select",["Antibiotic","Supplement","Vitamin","Vaccine","Other"]],["purpose","What it's for","text"],["cost","Cost (RWF)","number"],["dosage","Dosage as on the label","text"],["withdrawal","Withdrawal before sale (days)","number"],["dateBought","Date bought","date"],["rateMin","Calculator rate, low","number","Per litre, or per 100 birds a day for chicks"],["rateMax","Calculator rate, high","number","Per litre, or per 100 birds a day for growers"],["rateUnit","Rate unit","select",["g","ml"]],["basis","Rate basis","select",["per litre","per 100 birds per day"]],["avoidWith","Do not give together with","text","Product names, separated by commas"],["notes","Notes","text"]]},
+  doses:{title:"Dose",fields:[["start","First day given","date"],["end","Last day given","date","Leave empty while still giving"],["product","Product","product"],["timesPerDay","Times per day","number"],["notes","Notes","text"]]},
+  materials:{title:"Material or equipment",fields:[["name","Item","text"],["category","Category","select",["Housing & heating","Feeding & water","Bedding & cleaning","Protective gear","Measuring & medicine tools","Other"]],["kind","Kind","select",["Reusable","Used up"],"Reusable lasts several cycles; used up is bought again each cycle"],["qty","Quantity","number"],["unit","Unit","text","pieces, bags, kg, pairs, boxes…"],["unitCost","Cost per unit (RWF)","number","Leave empty if free or already owned"],["dateBought","Date bought","date"],["status","Status","select",["Have it","Running low","Need to buy","Broken or worn out"]],["cycles","Cycles it should last","number","For reusable items, e.g. 6. Used-up items count fully in one cycle"],["where","Where it is kept","text"],["notes","Notes","text"]]},
+  expenses:{title:"Expense",fields:[["date","Date","date"],["category","Category","select",EXP_CATS],["text","What for","text"],["amount","Amount (RWF)","number"],["paidTo","Paid to","text"],["notes","Notes","text"]]},
+  sales:{title:"Sale",fields:[["date","Date","date"],["buyer","Buyer","buyer"],["birds","Birds sold","number"],["kg","Total live weight (kg)","number","Weigh them at sale; leave empty if sold per bird"],["pricePerKg","Price per kg (RWF)","number"],["amount","Total amount (RWF)","number","Leave empty to use kg × price"],["paid","Amount paid so far (RWF)","number"],["notes","Notes","text"]]},
+  buyers:{title:"Buyer",fields:[["name","Name or shop","text"],["phone","Phone","text"],["place","Place","text"],["notes","Notes","text"]]},
+  weighins:{title:"Weigh-in",fields:[["date","Date","date"],["birds","Birds weighed","number","5–10 picked at random"],["totalKg","Total weight of those birds (kg)","number","Without the bucket or bag"],["feedLeftKg","Feed left in store that day (kg)","number","Needed for FCR; count unopened bags × 50 plus any open bag"],["notes","Notes","text"]]},
+  vaccines:{title:"Vaccination",fields:[["day","Day of the cycle","number"],["disease","Disease","text"],["vaccine","Vaccine","text"],["route","How it is given","select",["Drinking water","Eye drop","Spray","Coarse spray at the hatchery","Injection"]],["status","Status","select",["Planned","Given","Skipped","Not recorded"]],["dateGiven","Date given","date"],["notes","Notes","text"]]},
+  todos:{title:"To-do",fields:[["date","Target date","date"],["text","Reminder","text"],["done","Done","checkbox"],["notes","Notes","text"]]},
+  cycles:{title:"Cycle",fields:[["cycle","Cycle number","number"],["start","Start date","date"],["chicks","Chicks bought","number"],["bonus","Free chicks","number"],["deaths","Deaths","number"],["cost","Total cost (RWF)","number"],["revenue","Total revenue (RWF)","number"],["notes","Notes","text"]]}
+};
+function openForm(col,rec){
+  const F=FORMS[col];rec=rec||{};
+  $("#dlgTitle").textContent=(rec._id?"Edit ":"New ")+F.title.toLowerCase();
+  $("#dlgBody").innerHTML=`<div class="fgrid">${F.fields.map(([k2,l,t,o])=>{
+    const v=rec[k2]??(k2==="timesPerDay"?1:k2==="kgPerBag"?50:k2==="date"&&col!=="todos"?iso(todayMs()):k2==="pricePerKg"&&S.setup?num(S.setup.salePrice)||"":"");
+    let inp;
+    if(t==="select")inp=`<select id="f_${k2}">${o.map(x=>`<option ${String(v).toLowerCase()===x.toLowerCase()?"selected":""}>${x}</option>`).join("")}</select>`;
+    else if(t==="buyer")inp=`<input type="text" id="f_${k2}" list="buyerList" value="${esc(v)}" placeholder="Pick or type a name"><datalist id="buyerList">${[...new Set(S.buyers.map(b=>b.name).concat(S.sales.map(x=>x.buyer)).filter(Boolean))].map(n=>`<option value="${esc(n)}"></option>`).join("")}</datalist>`;
+    else if(t==="product")inp=`<select id="f_${k2}">${S.meds.map(m=>`<option ${m.name===v?"selected":""}>${esc(m.name)}</option>`).join("")}${v&&!S.meds.some(m=>m.name===v)?`<option selected>${esc(v)}</option>`:""}</select>`;
+    else if(t==="checkbox")inp=`<label class="check" style="border:0"><input type="checkbox" id="f_${k2}" ${v?"checked":""}><span>${l}</span></label>`;
+    else inp=`<input type="${t}" id="f_${k2}" value="${esc(v)}" ${t==="number"?'step="any"':""}>`;
+    const wide=["notes","purpose","dosage","avoidWith","where"].includes(k2)||(k2==="text"&&col==="todos");
+    return t==="checkbox"?`<div class="field">${inp}</div>`:`<div class="field ${wide?"wide":""}"><label for="f_${k2}">${l}</label>${inp}${typeof o==="string"?`<span class="hint">${o}</span>`:""}</div>`;
+  }).join("")}</div><p id="fErr" class="dz" hidden></p>`;
+  $("#dlgFoot").innerHTML=`${rec._id?`<button class="btn danger" type="button" id="fDel">Delete</button>`:""}<span class="spacer" style="flex:1"></span><button class="btn" type="button" id="fCancel">Cancel</button><button class="btn pri" type="button" id="fSave">Save</button>`;
+  const dlg=$("#dlg");dlg.showModal();
+  $("#fCancel").onclick=()=>dlg.close();
+  $("#fSave").onclick=async()=>{
+    const out={};F.fields.forEach(([k2,,t])=>{const el=$("#f_"+k2);if(t==="checkbox")out[k2]=el.checked;else if(t==="number")out[k2]=el.value===""?null:Number(el.value);else out[k2]=el.value.trim()});
+    const req={expenses:"amount",sales:"birds",buyers:"name",weighins:"totalKg",vaccines:"disease",materials:"name",feed:"date",meds:"name",doses:"start",todos:"text",cycles:"cycle"}[col];
+    if(out[req]===""||out[req]==null){const e=$("#fErr");e.textContent="Fill in "+F.fields.find(f=>f[0]===req)[1].toLowerCase()+" first.";e.hidden=false;return}
+    try{const ref=rec._id?db.collection(col).doc(rec._id):db.collection(col).doc();await ref.set(out);dlg.close();toast("Saved")}catch(e){writeFail(e)}
+  };
+  if(rec._id)$("#fDel").onclick=()=>{
+    const b=$("#fDel");if(b.dataset.armed){db.collection(col).doc(rec._id).delete().then(()=>{dlg.close();toast("Deleted")}).catch(writeFail)}else{b.dataset.armed="1";b.textContent="Tap again to delete"}
+  };
+}
+function writeFail(e){
+  if(e&&e.code==="invalid_argument"&&writeUnknown){canWrite=false;writeUnknown=false;schedule();toast("You can view this ledger but not change it.");return}
+  toast(e&&e.code==="quota_exceeded"?"The ledger is full. Delete old records to add more.":"Could not save. Check your connection and try again.");
+}
+const CAUSES=["","Unknown","Crushed or stepped on","Weak or not eating","Swollen belly (ascites)","Cold or piled up","Diarrhea","Breathing problems","Other"];
+const LITTER=["","Dry","Damp","Wet"], SMELL=["","None","Slight","Strong"];
+/* tap-to-log: what the farmer sees, picked instead of typed. Stored on daily records as obs: [..] */
+const OBS=[
+ ["How they look",[["All normal","ok"],["Eating well","ok"],["Drinking well","ok"],["Active","ok"],["Droppings normal","ok"]]],
+ ["Problems seen",[["Sneezing","bad"],["Wheezing","bad"],["Diarrhea","bad"],["Blood in droppings","bad"],["Huddling (cold)","bad"],["Panting (hot)","bad"],["Weak or sleepy","bad"],["Not eating","bad"],["Limping","bad"],["Found on back","bad"]]],
+ ["Done today",[["Bedding changed","do"],["Drinkers cleaned","do"],["Medicine given","do"],["Vitamins given","do"],["New feed bag opened","do"]]]
+];
+const OBS_KIND={};OBS.forEach(([,it])=>it.forEach(([v,c])=>OBS_KIND[v]=c));
+function dayObs(r){return r&&Array.isArray(r.obs)?r.obs.filter(x=>typeof x==="string"&&x):[]}
+function dayText(r){if(!r)return"";const o=dayObs(r);return [o.join(", "),String(r.notes||"").trim()].filter(Boolean).join(". ")}
+function obsPicker(pre,sel){return OBS.map(([g,items])=>`<div class="qgroup"><div class="eyebrow">${g}</div><div class="tags">${items.map(([v,c])=>`<button type="button" class="tap ${c}" data-tag="${pre}obs" data-v="${esc(v)}" aria-pressed="${sel.includes(v)}">${esc(v)}</button>`).join("")}</div></div>`).join("")}
+const SEG_TONE={Dry:"good",Damp:"warn",Wet:"crit",None:"good",Slight:"warn",Strong:"crit"};
+function segField(pre,id,label,opts,v,cls){return `<div class="field ${cls||""}" ${id==="cause"?`id="${pre}causewrap"`:""}><label>${label}</label><div class="${id==="cause"?"tags":"seg"}" role="group" aria-label="${label}">${opts.filter(Boolean).map(o=>`<button type="button" class="${id==="cause"?"tap bad":"segb "+(SEG_TONE[o]||"")}" data-seg="${pre}${id}" data-v="${esc(o)}" aria-pressed="${String(v||"")===o}">${esc(o)}</button>`).join("")}</div></div>`}
+function condFields(r,pre,deaths){
+  const showCause=deaths==null||deaths>0;
+  return `${segField(pre,"litter","Litter (bedding)",LITTER,r.litter)}${segField(pre,"smell","Ammonia smell",SMELL,r.smell)}<div class="field"><label for="${pre}temp">Room temperature (°C)</label><input type="number" inputmode="decimal" id="${pre}temp" step="0.5" value="${esc(r.temp??"")}"></div>${showCause?segField(pre,"cause","Cause of death",CAUSES,r.cause,"wide"):""}`}
+function segVal(key){const b=document.querySelector(`[data-seg="${key}"][aria-pressed="true"]`);return b?b.dataset.v:""}
+function readCond(pre){const t=$("#"+pre+"temp").value;return {cause:segVal(pre+"cause"),temp:t===""?null:Number(t),litter:segVal(pre+"litter"),smell:segVal(pre+"smell"),obs:[...document.querySelectorAll(`[data-tag="${pre}obs"][aria-pressed="true"]`)].map(b=>b.dataset.v)}}
+function readQuick(){const M=derive();const o={day:M.dayNow,deaths:num($("#qDeaths").textContent),notes:$("#qNotes").value,...readCond("q_")};if(!o.deaths)o.cause="";return o}
+function condLine(r){if(!r)return"";const b=[];dayObs(r).forEach(v=>{const c=OBS_KIND[v];b.push(`<span class="chip ${c==="bad"?"crit":c==="ok"?"good":"neutral"}">${esc(v)}</span>`)});if(r.cause&&num(r.deaths))b.push(`<span class="chip crit">${esc(r.cause)}</span>`);if(r.temp!=null&&r.temp!=="")b.push(`<span class="chip neutral">${esc(r.temp)} °C</span>`);if(r.litter)b.push(`<span class="chip ${r.litter==="Dry"?"good":r.litter==="Damp"?"warn":"crit"}">Litter ${esc(r.litter.toLowerCase())}</span>`);if(r.smell)b.push(`<span class="chip ${r.smell==="None"?"good":r.smell==="Slight"?"warn":"crit"}">Smell ${esc(r.smell.toLowerCase())}</span>`);return b.length?`<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px">${b.join("")}</div>`:""}
+function editDaily(day){
+  const M=derive();const d=M.days[day-1];const r=d.rec||{};
+  $("#dlgTitle").textContent=`Day ${day} · ${fd(d.date,1)}`;
+  $("#dlgBody").innerHTML=`<div class="fgrid"><div class="field"><label for="e_deaths">Deaths that day</label><input type="number" id="e_deaths" min="0" value="${num(r.deaths)}"><span class="hint">${d.startAlive} birds at the start of the day</span></div></div>${obsPicker("e_",dayObs(r))}<div class="fgrid" style="margin-top:14px">${condFields(r,"e_")}<div class="field wide"><label for="e_notes">Anything else? (optional)</label><textarea id="e_notes" rows="2" style="min-height:52px">${esc(r.notes||"")}</textarea></div></div><div id="mPhotos">${dayPhotoPanel(day)}</div>`;
+  modalDay=day;
+  $("#dlgFoot").innerHTML=`<span style="flex:1"></span><button class="btn" type="button" id="eC">Cancel</button><button class="btn pri" type="button" id="eS">Save</button>`;
+  const dlg=$("#dlg");dlg.showModal();$("#eC").onclick=()=>dlg.close();
+  $("#eS").onclick=async()=>{try{await db.collection("daily").doc(dayId(day)).set({day,deaths:Math.max(0,Math.round(num($("#e_deaths").value))),notes:$("#e_notes").value.trim(),...readCond("e_")});dlg.close();toast("Day "+day+" saved")}catch(e){writeFail(e)}};
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click",async e=>{
+  const pv=e.target.closest("[data-view],[data-upload],[data-dayph],[data-delph]");
+  if(pv){e.stopPropagation();
+    if(pv.dataset.view){const p=S.photos.find(x=>x._id===pv.dataset.view);if(!p)return;const list=p.kind==="day"?S.photos.filter(x=>x.kind==="day").sort((a,b)=>num(a.day)-num(b.day)||String(a.createdAt).localeCompare(String(b.createdAt))):p.kind==="med"?photosFor("med",p.medId):p.kind==="material"?photosFor("material",p.materialId):photosFor("other");openLB(list,Math.max(0,list.indexOf(p)));return}
+    if(pv.dataset.upload){pending=pv.dataset.upload==="day"?{kind:"day",day:+pv.dataset.key||0}:pv.dataset.upload==="med"?{kind:"med",medId:pv.dataset.key}:pv.dataset.upload==="material"?{kind:"material",materialId:pv.dataset.key}:{kind:"other"};$("#filePick").value="";$("#filePick").click();return}
+    if(pv.dataset.dayph){editDaily(+pv.dataset.dayph);return}
+    if(pv.dataset.delph){if(!pv.dataset.armed){pv.dataset.armed="1";pv.textContent="Tap again";return}const p=S.photos.find(x=>x._id===pv.dataset.delph);if(!p)return;
+      try{await db.collection("photos").doc(p._id).delete();if(assets)assets.delete(p.assetId).catch(()=>{});toast("Photo deleted")}catch(err){writeFail(err)}return}
+  }
+  const vg=e.target.closest("[data-vaxgiven]");
+  if(vg&&db){e.stopPropagation();const v=S.vaccines.find(x=>x._id===vg.dataset.vaxgiven);if(v){const o={...v};delete o._id;o.status="Given";o.dateGiven=iso(todayMs());try{await db.collection("vaccines").doc(v._id).set(o);toast("Marked as given")}catch(err){writeFail(err)}}return}
+  const gb=e.target.closest("[data-gotit]");
+  if(gb&&db){const m=S.materials.find(x=>x._id===gb.dataset.gotit);if(m){const o={...m};delete o._id;o.status="Have it";if(!o.dateBought)o.dateBought=iso(todayMs());try{await db.collection("materials").doc(m._id).set(o);toast(m.name+" marked as bought")}catch(err){writeFail(err)}}return}
+  const tg=e.target.closest("[data-tag],[data-seg]");
+  if(tg){
+    if(tg.dataset.tag){const on=tg.getAttribute("aria-pressed")!=="true";tg.setAttribute("aria-pressed",String(on));
+      const box=tg.closest(".panel,.mbody")||document;const all=box.querySelector(`[data-tag="${tg.dataset.tag}"][data-v="All normal"]`);
+      if(on&&tg.dataset.v==="All normal")box.querySelectorAll(`[data-tag="${tg.dataset.tag}"].bad`).forEach(b=>b.setAttribute("aria-pressed","false"));
+      if(on&&tg.classList.contains("bad")&&all)all.setAttribute("aria-pressed","false");
+      if(tg.dataset.tag==="q_obs"){quick=readQuick();render()}}
+    else{const key=tg.dataset.seg;const on=tg.getAttribute("aria-pressed")!=="true";document.querySelectorAll(`[data-seg="${key}"]`).forEach(b=>b.setAttribute("aria-pressed","false"));tg.setAttribute("aria-pressed",String(on));
+      if(key.startsWith("q_")){quick=readQuick();render()}}
+    return}
+  const t=e.target.closest("[data-tab],[data-go],[data-add],[data-edit],[data-day],[data-act],[data-step]");if(!t)return;
+  if(t.dataset.tab||t.dataset.go){tab=t.dataset.tab||t.dataset.go;try{history.replaceState(null,"","#"+tab)}catch(_){}render();window.scrollTo({top:0});return}
+  if(!db)return;
+  if(t.dataset.add&&canWrite!==false){openForm(t.dataset.add);return}
+  if(t.dataset.edit&&canWrite!==false){const col=t.dataset.edit;const rec=S[col].find(r=>r._id===t.dataset.id);if(rec)openForm(col,rec);return}
+  if(t.dataset.day&&canWrite!==false){editDaily(+t.dataset.day);return}
+  if(t.dataset.step){const o=$("#qDeaths");o.textContent=Math.max(0,num(o.textContent)+(+t.dataset.step));quick=readQuick();render();return}
+  const act=t.dataset.act;
+  if(act==="loadVax"){const M=derive();const w=VAX_TEMPLATE.map(([day,disease,vaccine,route,notes],i)=>db.collection("vaccines").doc("vax-"+(i+1)).set({day,disease,vaccine,route,notes,status:M.dayNow!=null&&day<M.dayNow?"Not recorded":"Planned",dateGiven:""}));
+    try{for(const p of w)await p;toast("Common plan loaded. Check it with the RAB office or a vet.")}catch(err){writeFail(err)}return}
+  if(act==="moveOther"){const M=derive();try{await db.collection("expenses").doc().set({date:S.setup.startDate,category:"Other",text:"Other costs moved from Setup",amount:M.other,paidTo:"",notes:"Was entered in Setup as other costs"});const o={...S.setup};delete o._id;o.otherCosts=0;await db.doc("farm/setup").set(o);toast("Moved to the expenses book")}catch(err){writeFail(err)}return}
+  if(act==="saveReport"){const o={...S.setup};delete o._id;o.farmName=$("#rp_farmName").value.trim();o.reportMessage=$("#rp_reportMessage").value.trim();["investorAmount","investorSharePct"].forEach(f=>{const v=$("#rp_"+f).value;o[f]=v===""?null:Number(v)});try{await db.doc("farm/setup").set(o);toast("Report settings saved")}catch(err){writeFail(err)}return}
+  if(act==="dlReport"){await downloadReport();return}
+  if(act==="useMatShare"){const o={...S.setup};delete o._id;o.coopShare=Math.round(derive().matCycle);try{await db.doc("farm/setup").set(o);toast("Setup now uses "+k(o.coopShare)+" RWF for materials")}catch(err){writeFail(err)}return}
+  if(act==="toggleDays"){showAllDays=!showAllDays;render();return}
+  if(act==="sameAsYesterday"){const M=derive();const p=S.daily[dayId(M.dayNow-1)];if(p){const q2=readQuick();quick={...q2,obs:dayObs(p),litter:p.litter||"",smell:p.smell||"",temp:p.temp??null};render();toast("Copied from yesterday. Change anything that is different.")}return}
+  if(act==="saveToday"){const q2=readQuick();const d=q2.day;const rec={...q2,notes:q2.notes.trim()};
+    try{await db.collection("daily").doc(dayId(d)).set(rec);quick=null;
+      // saving the log also ticks "deaths logged" on today's checklist
+      const di=iso(todayMs());const items={...(S.checks[di]?.items||{}),deaths:true};db.collection("checks").doc(di).set({date:di,items}).catch(()=>{});
+      render();toast("Day "+d+" saved")}catch(err){writeFail(err)}}
+  if(act==="saveSetup"){const out={...(S.setup||{})};delete out._id;["cycleName","startDate","notes"].forEach(k2=>out[k2]=($("#su_"+k2)?.value||"").trim());["cycleDays","chicks","bonusChicks","pricePerChick","targetWeight","actualWeight","salePrice","priceLow","priceHigh","otherCosts","coopShare"].forEach(k2=>{const v=$("#su_"+k2).value;out[k2]=v===""?null:Number(v)});
+    if(!parse(out.startDate)){toast("Enter a start date first.");return}
+    try{await db.doc("farm/setup").set(out);scen=null;toast("Setup saved")}catch(err){writeFail(err)}}
+  if(act==="closeCycle"){const M=derive();const n=(S.cycles.reduce((a,c)=>Math.max(a,num(c.cycle)),0)||0)+1;const exist=S.cycles.find(c=>c.start===S.setup.startDate);
+    const data={cycle:exist?num(exist.cycle):n,start:S.setup.startDate,chicks:M.chicks,bonus:M.bonus,deaths:M.deaths,cost:M.totalCost,revenue:M.revenue,notes:(num(M.st.actualWeight)?"Final":"Projected")+" at "+M.weight+" kg × "+M.price+" RWF/kg"};
+    try{await db.collection("cycles").doc(exist?exist._id:"cycle-"+n).set(data);toast("Cycle results saved")}catch(err){writeFail(err)}}
+});
+document.addEventListener("change",async e=>{
+  const t=e.target;
+  if(t.id==="filePick"&&pending&&t.files.length){const tg=pending;pending=null;await uploadFiles([...t.files],tg);return}
+  if(t.dataset.moveph&&db){const p=S.photos.find(x=>x._id===t.dataset.moveph);const M=derive();const n=Math.round(num(t.value));if(p&&n>=1&&n<=M.cycleDays&&n!==num(p.day)){const o={...p};delete o._id;o.day=n;o.date=iso(M.start+(n-1)*DAY);try{await db.collection("photos").doc(p._id).set(o);toast("Moved to day "+n)}catch(err){writeFail(err)}}return}
+  if(t.dataset.cap&&db){const p=S.photos.find(x=>x._id===t.dataset.cap);if(p){const o={...p};delete o._id;o.caption=t.value.trim();try{await db.collection("photos").doc(p._id).set(o)}catch(err){writeFail(err)}}return}
+  if(t.dataset.check&&db){const d=iso(todayMs());const items={...(S.checks[d]?.items||{})};items[t.dataset.check]=t.checked;try{await db.collection("checks").doc(d).set({date:d,items})}catch(err){writeFail(err)}}
+  if(t.dataset.todo&&db){const r=S.todos.find(x=>x._id===t.dataset.todo);if(r){const o={...r};delete o._id;o.done=t.checked;try{await db.collection("todos").doc(r._id).set(o)}catch(err){writeFail(err)}}}
+  if(t.id==="donly"){dailyFilter.deathsOnly=t.checked;render()}
+  if(t.id==="cStage"){calc.stage=t.value;render()}
+  if(t.id==="sExtra"&&scen){scen.extra=Math.max(0,num(t.value));render()}
+  const map2={sBirds:"birds",sWeight:"weight",sPrice:"price",sBags:"bags"};
+  if(map2[t.id]&&scen){scen[map2[t.id]]=Number(t.value);render()}
+});
+document.addEventListener("input",e=>{
+  const t=e.target;
+  if(t.id==="dq"){dailyFilter.q=t.value;render()}
+  if((t.id==="qNotes"||t.id==="q_temp")&&$("#qDeaths"))quick=readQuick();
+  if(t.id==="cL"){const v=num(t.value);if(v>0){calc.litres=v;render()}}
+  const map={sBirds:"birds",sWeight:"weight",sPrice:"price",sBags:"bags"};
+  if(map[t.id]&&scen){const o=$("#"+t.id+"o");const v=Number(t.value);if(o)o.textContent=t.id==="sWeight"?v.toFixed(2)+" kg":t.id==="sPrice"?k(v)+" RWF":t.id==="sBags"?v+" bags":String(v)}
+});
+$("#lbPrev").onclick=()=>{if(lbIdx>0){lbIdx--;showLB()}};$("#lbNext").onclick=()=>{if(lbIdx<lbList.length-1){lbIdx++;showLB()}};$("#lbClose").onclick=()=>$("#lb").close();
+$("#lb").addEventListener("keydown",e=>{if(e.key==="ArrowLeft")$("#lbPrev").click();if(e.key==="ArrowRight")$("#lbNext").click()});
+$("#dlg").addEventListener("close",()=>{modalDay=null});
+/* tooltip */
+const tip=$("#tip");
+document.addEventListener("pointermove",e=>{
+  const h=e.target.closest&&e.target.closest("[data-tip]");
+  if(!h){tip.hidden=true;hideXhair();return}
+  tip.innerHTML=h.getAttribute("data-tip");tip.hidden=false;
+  const w=tip.offsetWidth,hh=tip.offsetHeight;let x=e.clientX+14,y=e.clientY+14;
+  if(x+w>innerWidth-8)x=e.clientX-w-14;if(y+hh>innerHeight-8)y=e.clientY-hh-14;
+  tip.style.left=Math.max(8,x)+"px";tip.style.top=Math.max(8,y)+"px";
+  const cx=h.getAttribute("data-cx");
+  if(cx!=null){const g=h.closest("svg")&&h.closest("svg").querySelector(".xhair");
+    if(g){if(activeXhair&&activeXhair!==g)activeXhair.setAttribute("visibility","hidden");activeXhair=g;
+      const ln=g.querySelector("line");if(ln){ln.setAttribute("x1",cx);ln.setAttribute("x2",cx)}
+      const cys=(h.getAttribute("data-cy")||"").split(",").filter(s=>s!=="");
+      g.querySelectorAll(".focus").forEach((c,i)=>{if(i<cys.length){c.setAttribute("cx",cx);c.setAttribute("cy",cys[i]);c.setAttribute("visibility","visible")}else c.setAttribute("visibility","hidden")});
+      g.setAttribute("visibility","visible");}
+  }else hideXhair();
+});
+document.addEventListener("pointerleave",()=>{tip.hidden=true;hideXhair()});
+
+async function downloadReport(){
+  const el=document.getElementById("reportDoc");if(!el)return;
+  if(!downloads){toast("Downloads are not available here.");return}
+  const c=el.cloneNode(true);c.querySelectorAll("rect.hit").forEach(r=>r.remove());
+  for(const img of c.querySelectorAll("img")){try{const r=await fetch(img.getAttribute("src"));const b=await r.blob();img.src=await new Promise(res=>{const f=new FileReader();f.onload=()=>res(f.result);f.readAsDataURL(b)})}catch(e){img.remove()}}
+  const css=[...document.querySelectorAll("style")].map(x=>x.textContent).join("\n");
+  const name=(S.setup?.farmName||"flock")+" "+(S.setup?.cycleName||"cycle")+" report";
+  const html=`<!doctype html><html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(name)}</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"><style>${css}html,body{background:#F2F4EE}body{padding:24px}.report{max-width:960px;margin:0 auto;box-shadow:0 2px 24px rgba(25,32,23,.08)}@media print{html,body{background:#fff}.report{box-shadow:none}}</style></head><body>${c.outerHTML}</body></html>`;
+  try{await downloads.save({filename:name.replace(/[^\w-]+/g,"_")+".html",data:html})}catch(err){if(!err||err.code!=="declined")toast("The report could not be downloaded.")}
+}
+/* ---------- export ---------- */
+function loadXLSX(){return new Promise((res,rej)=>{if(window.XLSX)return res(window.XLSX);const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";s.onload=()=>res(window.XLSX);s.onerror=rej;document.head.appendChild(s)})}
+$("#exportBtn").addEventListener("click",async()=>{
+  const b=$("#exportBtn");b.disabled=true;b.textContent="Preparing…";
+  try{
+    const X=await loadXLSX();const M=derive();const wb=X.utils.book_new();
+    const add=(name,rows)=>X.utils.book_append_sheet(wb,X.utils.aoa_to_sheet(rows),name);
+    const st=M.st;
+    add("Setup",[["Item","Value"],["Cycle name",st.cycleName],["Start date",st.startDate],["Chicks bought",M.chicks],["Price per chick (RWF)",num(st.pricePerChick)],["Target sale weight (kg)",num(st.targetWeight)],["Expected sale price (RWF/kg)",M.price],["Other costs (RWF)",M.other],["Coop/equipment share (RWF)",M.coop],["Actual avg weight at sale (kg)",st.actualWeight??""],["Bonus chicks",M.bonus],["Total chicks in flock",M.flock]]);
+    add("Daily Log",[["Date","Day #","Birds alive (start)","Deaths","Birds alive (end)","Notes"],...M.days.map(d=>[iso(d.date),d.day,d.startAlive,d.deaths,d.endAlive,d.text]),["TOTALS","","",M.deaths,M.alive,""]]);
+    add("Feed Purchases",[["Date","Feed type","Bags","kg per bag","Cost per bag (RWF)","Total (RWF)"],...S.feed.map(f=>[f.date,f.type,num(f.bags),num(f.kgPerBag),num(f.costPerBag),num(f.bags)*num(f.costPerBag)]),["TOTAL","","","","",M.feedCost]]);
+    add("Medicine Log",[["Product","Type","What it's for","Cost (RWF)","Dosage / rate","Withdrawal (days)","Date bought","Do not combine with","Notes"],...S.meds.map(m=>[m.name,m.type,m.purpose,num(m.cost),m.dosage,num(m.withdrawal),m.dateBought,m.avoidWith||"",m.notes||""]),["TOTAL","","",M.medCost]]);
+    add("Dosing Log",[["First day","Last day","Product","Times per day","Days given","Total doses","Wait (days)","Safe to sell after","Notes"],...M.doses.map(d=>[d.start,d.end||"still giving",d.product,num(d.timesPerDay)||1,d.daysGiven??"",d.total??"",d.wd??"",d.safe!=null?iso(d.safe):"no wait",d.notes||""]),["Latest safe-to-sell date","","","","","","",M.latestSafe!=null?iso(M.latestSafe):"none"]]);
+    add("Cycle Summary",[["Item","Value"],["Chicks paid for",M.chicks],["Total chicks in flock",M.flock],["Total deaths",M.deaths],["Birds alive",M.alive],["Mortality rate",+(M.mortality*100).toFixed(2)+"%"],["Chicks cost",M.chickCost],["Feed cost",M.feedCost],["Medicine cost",M.medCost],["Other costs",M.other],["Coop/equipment",M.coop],["TOTAL COST",M.totalCost],["Sale weight (kg)",M.weight],["Price per kg",M.price],["TOTAL REVENUE",M.revenue],["TOTAL PROFIT",M.profit]]);
+    add("Materials",[["Item","Category","Kind","Qty","Unit","Cost per unit (RWF)","Total (RWF)","Cycles it lasts","Status","Date bought","Kept","Notes"],...S.materials.map(m=>[m.name,m.category,m.kind,m.qty??"",m.unit||"",m.unitCost??"",M.matCost(m),m.cycles??"",m.status||"",m.dateBought||"",m.where||"",m.notes||""])]);
+    add("Expenses",[["Date","Category","What for","Paid to","Amount (RWF)","Notes"],...S.expenses.map(e=>[e.date,e.category,e.text||"",e.paidTo||"",num(e.amount),e.notes||""]),["TOTAL","","","",M.expTotal,""]]);
+    add("Sales",[["Date","Buyer","Birds","Live kg","Price per kg","Amount (RWF)","Paid (RWF)","Notes"],...S.sales.map(x=>[x.date,x.buyer||"",num(x.birds),num(x.kg),num(x.pricePerKg),saleAmt(x),num(x.paid),x.notes||""]),["TOTAL","",M.soldBirds,M.soldKg,"",M.salesAmt,M.salesPaid,""]]);
+    add("Buyers",[["Name","Phone","Place","Notes"],...S.buyers.map(b=>[b.name,b.phone||"",b.place||"",b.notes||""])]);
+    add("Weigh-ins",[["Date","Day","Birds weighed","Total kg","Average kg","Feed left (kg)","FCR"],...M.weighins.map(w=>[w.date,w.day,num(w.birds),num(w.totalKg),+w.avg.toFixed(3),w.feedLeftKg??"",w.fcr?+w.fcr.toFixed(2):""])]);
+    add("Vaccinations",[["Day","Disease","Vaccine","How","Status","Date given","Notes"],...M.vax.map(v=>[num(v.day),v.disease,v.vaccine||"",v.route||"",v.status||"",v.dateGiven||"",v.notes||""])]);
+    add("Reminders",[["Target date","Reminder","Done","Notes"],...S.todos.map(t=>[t.date||"",t.text,t.done?"yes":"no",t.notes||""])]);
+    const buf=X.write(wb,{bookType:"xlsx",type:"array"});
+    await downloads.save({filename:(st.cycleName||"cycle").replace(/[^\w-]+/g,"_")+"_flock_ledger.xlsx",data:buf});
+  }catch(err){if(!err||err.code!=="declined")toast(err&&err.code?"The download is not available here.":"Could not build the Excel file.")}
+  b.disabled=false;b.textContent="Export to Excel";
+});
+
+/* ---------- boot ---------- */
+render();
+(async()=>{
+  const claude=window.claude;
+  if(!claude||!claude.use){setSync("bad","Records unavailable here");$("#view").innerHTML=`<div class="empty"><h3>Records could not load</h3><p>Open this page in a normal browser window (not private mode) so it can save records.</p></div>`;return}
+  const [dbx,user,dlx,asx]=await Promise.all([claude.use("db"),claude.use("user").catch(()=>null),claude.use("downloads").catch(()=>null),claude.use("assets").catch(()=>null)]);
+  db=dbx;downloads=dlx;assets=asx;
+  if(downloads)$("#exportBtn").hidden=false;
+  if(!db){setSync("bad","Records unavailable here");$("#view").innerHTML=`<div class="empty"><h3>Records could not load</h3><p>Open this page in a normal browser window (not private mode) so it can save records.</p></div>`;return}
+  if(user){try{const c=await user.can("data.write");canWrite=c!==false;writeUnknown=c===null}catch(_){}}
+  setSync("","Syncing");
+  const onErr=e=>{setSync("bad",e&&e.code==="revoked"?"Access changed":"Sync stopped")};
+  const mark=n=>{S.loaded.add(n);if(S.loaded.size>=15)setSync("ok",window.__assetURL?"Saved on this device":(canWrite===false?"View only":"Saved and synced"));schedule()};
+  db.doc("farm/setup").onSnapshot(s=>{S.setup=s.exists?{...s.data()}:null;mark("setup")},onErr);
+  db.collection("daily").onSnapshot(q=>{const o={};q.docs.forEach(d=>o[d.id]={...d.data()});S.daily=o;mark("daily")},onErr);
+  ["feed","meds","doses","todos","cycles","photos","materials","expenses","sales","buyers","weighins","vaccines"].forEach(c=>db.collection(c).onSnapshot(q=>{S[c]=q.docs.map(d=>({...d.data(),_id:d.id}));mark(c)},onErr));
+  db.collection("checks").onSnapshot(q=>{const o={};q.docs.forEach(d=>o[d.id]={...d.data()});S.checks=o;mark("checks")},onErr);
+})();
+})();
+</script>
+
+</body></html>
