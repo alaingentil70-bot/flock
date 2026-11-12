@@ -1,71 +1,164 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
-<script>window.__SEED__={"data": {}, "assets": {}};</script>
+<script>window.__FIREBASE__={"apiKey": "AIzaSyB0rW2iQJBK0IqlVNTwliVLWalezYa2S34", "authDomain": "flock-ledger-452a4.firebaseapp.com", "projectId": "flock-ledger-452a4", "storageBucket": "flock-ledger-452a4.firebasestorage.app", "messagingSenderId": "904710850", "appId": "1:904710850:web:b1a529da4d04514019495b"};</script>
 <script>
 (function(){
 "use strict";
-const SEED=window.__SEED__; delete window.__SEED__;
-const KEY="broiler-flock-ledger-v1";
-const urls=new Map(); let idb=null;
-function openIDB(){return new Promise((res)=>{try{const r=indexedDB.open("broiler-flock-ledger",1);r.onupgradeneeded=()=>r.result.createObjectStore("assets");r.onsuccess=()=>res(r.result);r.onerror=()=>res(null)}catch(e){res(null)}})}
-function idbAll(){return new Promise(res=>{if(!idb)return res([]);const out=[];const tx=idb.transaction("assets","readonly");const c=tx.objectStore("assets").openCursor();c.onsuccess=()=>{const cur=c.result;if(cur){out.push([cur.key,cur.value]);cur.continue()}else res(out)};c.onerror=()=>res(out)})}
-function idbPut(id,b){return new Promise((res,rej)=>{if(!idb)return rej({code:"unavailable"});const tx=idb.transaction("assets","readwrite");tx.objectStore("assets").put(b,id);tx.oncomplete=()=>res();tx.onerror=()=>rej({code:"quota_exceeded"})})}
-function idbDel(id){return new Promise(res=>{if(!idb)return res();const tx=idb.transaction("assets","readwrite");tx.objectStore("assets").delete(id);tx.oncomplete=()=>res();tx.onerror=()=>res()})}
-function dataURLtoBlob(u){const [h,b]=u.split(",");const mime=h.match(/data:([^;]+)/)[1];const bin=atob(b);const a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);return new Blob([a],{type:mime})}
-function blobToDataURL(b){return new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)})}
-window.__assetURL=id=>urls.get(id)||"";
-let store=null;
-function load(){try{const t=localStorage.getItem(KEY);if(t)return JSON.parse(t)}catch(e){}return null}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(store));return true}catch(e){return false}}
-const listeners=new Set();
-function notify(){listeners.forEach(fn=>{try{fn()}catch(e){console.error(e)}})}
-const rid=()=>Math.random().toString(36).slice(2,12)+Date.now().toString(36);
-function snap(id,d){return{id,exists:!!d,data:()=>d?JSON.parse(JSON.stringify(d)):undefined,metadata:{fromCache:false,hasPendingWrites:false}}}
-function col(name){
-  const c=()=>(store[name]=store[name]||{});
-  const ref={path:name,
-    doc(id){id=id||rid();return{id,path:name+"/"+id,
-      get:async()=>snap(id,c()[id]),
-      set:async(d)=>{c()[id]=JSON.parse(JSON.stringify(d));if(!save())throw{code:"quota_exceeded"};notify()},
-      update:async(d)=>{if(!c()[id])throw{code:"invalid_argument"};Object.assign(c()[id],JSON.parse(JSON.stringify(d)));save();notify()},
-      delete:async()=>{delete c()[id];save();notify()},
-      onSnapshot(next){const fn=()=>next(snap(id,c()[id]));listeners.add(fn);setTimeout(fn,0);return()=>listeners.delete(fn)}}},
-    add:async(d)=>{const r=ref.doc();await r.set(d);return r},
-    onSnapshot(next){const fn=()=>{const docs=Object.keys(c()).sort().map(k=>snap(k,c()[k]));next({docs,size:docs.length,empty:!docs.length,docChanges:()=>[],metadata:{fromCache:false,hasPendingWrites:false}})};listeners.add(fn);setTimeout(fn,0);return()=>listeners.delete(fn)}};
-  return ref;
-}
+// Online version of the window.claude shim, used by the GitHub Pages build (build.py --public).
+// Records live in Firebase (Firestore) under users/<Google uid>/<collection>/<doc>, so every
+// device signed in to the same Google account sees the same farm. Firestore keeps a copy on the
+// device, so the app works offline and syncs when the connection comes back.
+// Photos are stored as small data-URL documents in users/<uid>/assets (no paid Storage needed).
+const CFG=window.__FIREBASE__; delete window.__FIREBASE__; delete window.__SEED__;
+const SDK="https://cdnjs.cloudflare.com/ajax/libs/firebase/13.2.0/";
+const COLS=["farm","daily","feed","meds","doses","todos","photos","checks","cycles","materials","expenses","sales","buyers","weighins","vaccines","archive"];
+const MAX_ASSET=700*1024; // a Firestore document holds at most 1 MiB; keep photos well under it
+
+let fs=null, auth=null, uid=null, email="";
+const urls=new Map(), loading=new Map();
+const PH=id=>"data:image/svg+xml,"+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 3"><!--${id}--></svg>`);
+
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=()=>rej(new Error("Could not load "+src));document.head.appendChild(s)})}
+const root=()=>fs.collection("users").doc(uid);
+const mapErr=e=>({code:e&&e.code==="permission-denied"?"revoked":e&&e.code==="resource-exhausted"?"quota_exceeded":e&&e.code==="invalid-argument"?"invalid_argument":"unavailable",message:e&&e.message});
+// Writes go into the device copy at once. Wait briefly for the server so real errors (too big,
+// not allowed) reach the app; if there is no answer in time the write is queued and syncs later.
+function settle(p){let t,late=false;const timeout=new Promise(r=>{t=setTimeout(()=>{late=true;r()},2500)});
+  // after the wait the app has moved on, so a late failure is reported here instead
+  p.catch(e=>{console.warn("Sync write failed",e);if(late)msg("A change could not be saved online ("+(e.code||"error")+"). Check it and try again.")});
+  return Promise.race([p.then(()=>clearTimeout(t)),timeout]).catch(e=>{clearTimeout(t);throw mapErr(e)})}
+
+function wrapSnap(s){return{id:s.id,exists:s.exists,data:()=>s.exists?s.data():undefined,metadata:s.metadata}}
+function wrapDoc(r,name){return{id:r.id,path:name+"/"+r.id,
+  get:async()=>wrapSnap(await r.get()),
+  set:d=>settle(r.set(d)),
+  update:d=>settle(r.update(d)),
+  delete:()=>settle(r.delete()),
+  onSnapshot(next,err){return r.onSnapshot(s=>next(wrapSnap(s)),e=>err&&err(mapErr(e)))}}}
+function col(name){const c=root().collection(name);const ref={path:name,
+  doc(id){return wrapDoc(id?c.doc(id):c.doc(),name)},
+  add:async d=>{const r=c.doc();await settle(r.set(d));return wrapDoc(r,name)},
+  onSnapshot(next,err){return c.onSnapshot(q=>{const docs=q.docs.map(wrapSnap);next({docs,size:docs.length,empty:!docs.length,docChanges:()=>[],metadata:q.metadata})},e=>err&&err(mapErr(e)))}};return ref}
 const db={collection:col,doc(p){const [c,i]=p.split("/");return col(c).doc(i)}};
+
+/* ---------- photos ---------- */
+function blobToDataURL(b){return new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)})}
+async function fitBlob(b){
+  if(b.size<=MAX_ASSET)return b;
+  try{const bmp=await createImageBitmap(b);let side=1600,q=0.8,out=b;
+    for(let i=0;i<6&&out.size>MAX_ASSET;i++){const sc=Math.min(1,side/Math.max(bmp.width,bmp.height));const c=document.createElement("canvas");c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+      out=await new Promise(r=>c.toBlob(x=>r(x||out),"image/jpeg",q));side=Math.round(side*0.8);q=Math.max(0.5,q-0.07)}
+    return out}catch(e){return b}
+}
+function swapIn(id,url){urls.set(id,url);const ph=PH(id);document.querySelectorAll("img").forEach(im=>{if(im.getAttribute("src")===ph)im.src=url})}
+function fetchAsset(id){
+  if(loading.has(id)||!uid)return;
+  loading.set(id,root().collection("assets").doc(id).get().then(s=>{if(s.exists&&s.data().data)swapIn(id,s.data().data)}).catch(()=>{}).finally(()=>loading.delete(id)));
+}
+window.__assetURL=id=>{if(!id)return"";const u=urls.get(id);if(u)return u;fetchAsset(id);return PH(id)};
 const assets={
-  upload:async(b)=>{const id=rid();await idbPut(id,b);urls.set(id,URL.createObjectURL(b));return{id,url:urls.get(id),sizeBytes:b.size,contentType:b.type}},
-  delete:async(id)=>{await idbDel(id);urls.delete(id);return{}},
+  upload:async b=>{const f=await fitBlob(b);if(f.size>MAX_ASSET)throw{code:"quota_exceeded"};const data=await blobToDataURL(f);
+    const r=root().collection("assets").doc();await settle(r.set({data,type:f.type||"image/jpeg",size:f.size,createdAt:new Date().toISOString()}));urls.set(r.id,data);return{id:r.id,url:data,sizeBytes:f.size,contentType:f.type}},
+  delete:async id=>{urls.delete(id);await settle(root().collection("assets").doc(id).delete());return{}},
   list:async()=>({assets:[],usage:{}})};
+
+/* ---------- downloads ---------- */
 function saveFile(name,data,type){const b=data instanceof Blob?data:new Blob([data],{type:type||"application/octet-stream"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500)}
 const downloads={save:async({filename,data})=>saveFile(filename,data)};
-const ready=(async()=>{
-  idb=await openIDB();
-  store=load();
-  if(!store){store=JSON.parse(JSON.stringify(SEED.data));save();for(const [id,u] of Object.entries(SEED.assets)){try{await idbPut(id,dataURLtoBlob(u))}catch(e){}}}
-  else{let ch=false;for(const c of Object.keys(SEED.data)){if(!store[c]||!Object.keys(store[c]).length){if(Object.keys(SEED.data[c]).length){store[c]=JSON.parse(JSON.stringify(SEED.data[c]));ch=true}}}if(ch)save()}
-  const all=await idbAll();
-  for(const [id,b] of all)urls.set(id,URL.createObjectURL(b));
-  for(const [id,u] of Object.entries(SEED.assets))if(!urls.has(id))urls.set(id,u);
-  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",addBackupUI);else addBackupUI();
-})();
-window.claude={use:async n=>{await ready;return n==="db"?db:n==="user"?{can:async()=>true,isOwner:async()=>true,canEdit:async()=>true}:n==="assets"?(idb?assets:null):n==="downloads"?downloads:null}};
-function addBackupUI(){
-  const row=document.querySelector(".brandrow");if(!row)return;
-  const mk=(t,fn)=>{const b=document.createElement("button");b.type="button";b.className="btn sm";b.textContent=t;b.onclick=fn;return b};
-  const inp=document.createElement("input");inp.type="file";inp.accept=".json,application/json";inp.hidden=true;
-  inp.onchange=async()=>{const f=inp.files[0];if(!f)return;try{const j=JSON.parse(await f.text());if(!j||!j.data||!j.data.farm)throw 0;
-      store=j.data;save();for(const [id,u] of Object.entries(j.assets||{})){const b=dataURLtoBlob(u);await idbPut(id,b);urls.set(id,URL.createObjectURL(b))}
-      notify();msg("Backup restored")}catch(e){msg("That file is not a ledger backup.")}inp.value=""};
-  const back=mk("Back up",async()=>{const used=new Set(Object.values(store.photos||{}).map(p=>p.assetId));const out={app:"broiler-flock-ledger",savedAt:new Date().toISOString(),data:store,assets:{}};
-      const all=await idbAll();for(const [id,b] of all)if(used.has(id))out.assets[id]=await blobToDataURL(b);
-      const d=new Date();saveFile(`flock-ledger-backup-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.json`,JSON.stringify(out),"application/json");msg("Backup saved to your downloads")});
-  const rest=mk("Restore",()=>inp.click());
-  back.title="Save all records and photos to one file";rest.title="Load a backup file";
-  const exp=document.getElementById("exportBtn");row.insertBefore(back,exp);row.insertBefore(rest,exp);row.appendChild(inp);
+
+/* ---------- sign-in gate ---------- */
+let gate=null;
+function showGate(state,text){
+  if(!gate){gate=document.createElement("div");gate.id="authGate";gate.setAttribute("role","dialog");gate.setAttribute("aria-modal","true");
+    gate.style.cssText="position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px;background:var(--bg,#F2F4EE);color:var(--ink,#192017);font-family:var(--f-body,system-ui,sans-serif)";
+    document.body.appendChild(gate)}
+  const btn=state==="signin"?`<button type="button" class="btn pri" id="gateBtn" style="min-height:46px;padding-inline:22px;font-size:1rem">Sign in with Google</button>`:state==="error"?`<button type="button" class="btn pri" id="gateReload" style="min-height:46px;padding-inline:22px">Try again</button>`:"";
+  gate.innerHTML=`<div style="max-width:380px;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center">
+    <div style="font-family:var(--f-display,system-ui);font-weight:800;font-stretch:75%;font-size:1.9rem;letter-spacing:.01em;text-transform:uppercase">Broiler Flock Ledger</div>
+    <p style="margin:0;color:var(--ink2,#465042);line-height:1.5">${text}</p>${btn}</div>`;
+  const b=document.getElementById("gateBtn");if(b)b.onclick=signIn;
+  const r=document.getElementById("gateReload");if(r)r.onclick=()=>location.reload();
+  gate.hidden=false;
 }
-function msg(t){const e=document.createElement("div");e.className="toast";e.setAttribute("role","status");e.setAttribute("aria-live","polite");e.textContent=t;document.body.appendChild(e);setTimeout(()=>e.remove(),2800)}
+function hideGate(){if(gate)gate.hidden=true}
+async function signIn(){
+  const p=new firebase.auth.GoogleAuthProvider();p.setCustomParameters({prompt:"select_account"});
+  const b=document.getElementById("gateBtn");if(b){b.disabled=true;b.textContent="Opening Google…"}
+  try{await auth.signInWithPopup(p)}
+  catch(e){
+    if(e&&(e.code==="auth/popup-blocked"||e.code==="auth/operation-not-supported-in-this-environment")){try{await auth.signInWithRedirect(p);return}catch(e2){e=e2}}
+    if(e&&e.code!=="auth/popup-closed-by-user"&&e.code!=="auth/cancelled-popup-request")msg("Sign-in did not work: "+(e.code||"error"));
+    if(b){b.disabled=false;b.textContent="Sign in with Google"}
+  }
+}
+
+/* ---------- back up / restore (whole account) ---------- */
+async function backup(){
+  msg("Preparing the backup…");
+  const out={app:"broiler-flock-ledger",savedAt:new Date().toISOString(),data:{},assets:{}};
+  for(const c of COLS){const q=await root().collection(c).get();if(q.empty)continue;out.data[c]={};q.forEach(d=>out.data[c][d.id]=d.data())}
+  const used=new Set();Object.values(out.data.photos||{}).forEach(p=>p.assetId&&used.add(p.assetId));
+  Object.values(out.data.archive||{}).forEach(a=>((a&&a.photos)||[]).forEach(p=>p.assetId&&used.add(p.assetId)));
+  for(const id of used){try{const s=await root().collection("assets").doc(id).get();if(s.exists)out.assets[id]=s.data().data}catch(e){}}
+  const d=new Date();saveFile(`flock-ledger-backup-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}.json`,JSON.stringify(out),"application/json");
+  msg("Backup saved to your downloads");
+}
+async function restore(file){
+  let j;try{j=JSON.parse(await file.text());if(!j||!j.data||!j.data.farm)throw 0}catch(e){msg("That file is not a ledger backup.");return}
+  if(!navigator.onLine){msg("Connect to the internet to restore a backup.");return}
+  try{
+    msg("Restoring… keep this page open.");
+    // 1. photos first, so records never point at a missing photo
+    const ids=Object.keys(j.assets||{});let n=0;
+    for(const id of ids){const data=j.assets[id];if(typeof data!=="string"||data.length>1000000){continue}
+      await root().collection("assets").doc(id).set({data,type:(data.match(/^data:([^;]+)/)||[])[1]||"image/jpeg",size:data.length,restoredAt:new Date().toISOString()});urls.set(id,data);n++;
+      if(n%4===0)msg(`Uploading photos: ${n} of ${ids.length}`)}
+    // 2. replace every record section with the backup's
+    for(const c of COLS){
+      const cur=await root().collection(c).get();const want=(j.data[c]&&typeof j.data[c]==="object")?j.data[c]:{};
+      let batch=fs.batch(),ops=0;const flush=async()=>{if(ops){await batch.commit();batch=fs.batch();ops=0}};
+      for(const d of cur.docs){if(!(d.id in want)){batch.delete(d.ref);ops++;if(ops>=400)await flush()}}
+      for(const [id,v] of Object.entries(want)){batch.set(root().collection(c).doc(id),v);ops++;if(ops>=400)await flush()}
+      await flush();
+    }
+    msg("Backup restored. It is now on all your devices.");
+  }catch(e){console.error(e);msg("Restore stopped: "+(e.code||e.message||"error")+". Try again.")}
+}
+function addHeaderUI(){
+  const row=document.querySelector(".brandrow");if(!row||document.getElementById("acctBtn"))return;
+  const mk=(t,fn,id)=>{const b=document.createElement("button");b.type="button";b.className="btn sm";b.textContent=t;b.onclick=fn;if(id)b.id=id;return b};
+  const inp=document.createElement("input");inp.type="file";inp.accept=".json,application/json";inp.hidden=true;
+  inp.onchange=async()=>{const f=inp.files[0];inp.value="";if(f)await restore(f)};
+  const back=mk("Back up",()=>backup().catch(e=>msg("Backup failed: "+(e.code||"error"))));
+  let armT=null;const rest=mk("Restore",()=>{if(!rest.dataset.armed){rest.dataset.armed="1";rest.textContent="Tap again: replaces all records";clearTimeout(armT);armT=setTimeout(()=>{delete rest.dataset.armed;rest.textContent="Restore"},5000);return}
+    delete rest.dataset.armed;rest.textContent="Restore";inp.click()});
+  const acct=mk("Sign out",async()=>{if(!acct.dataset.armed){acct.dataset.armed="1";acct.textContent="Tap again to sign out";setTimeout(()=>{delete acct.dataset.armed;acct.textContent="Sign out"},5000);return}
+    await auth.signOut();location.reload()},"acctBtn");
+  back.title="Save all records and photos to one file";rest.title="Load a backup file into your online records (all devices)";acct.title="Signed in as "+email;
+  const exp=document.getElementById("exportBtn");row.insertBefore(back,exp);row.insertBefore(rest,exp);row.appendChild(acct);row.appendChild(inp);
+}
+function syncLabel(){return navigator.onLine?"Synced online":"Offline: saved on this device, syncs later"}
+window.__storageLabel=syncLabel;
+function paintSync(){const el=document.getElementById("sync");if(el&&el.classList.contains("ok")){el.lastElementChild.textContent=syncLabel()}}
+addEventListener("online",paintSync);addEventListener("offline",paintSync);
+function msg(t){const e=document.createElement("div");e.className="toast";e.setAttribute("role","status");e.setAttribute("aria-live","polite");e.textContent=t;document.body.appendChild(e);setTimeout(()=>e.remove(),3200)}
+
+/* ---------- start up ---------- */
+const domReady=new Promise(r=>document.readyState==="loading"?document.addEventListener("DOMContentLoaded",r):r());
+const ready=(async()=>{
+  await domReady;
+  showGate("wait","Connecting…");
+  try{await loadScript(SDK+"firebase-app-compat.min.js");await Promise.all([loadScript(SDK+"firebase-auth-compat.min.js"),loadScript(SDK+"firebase-firestore-compat.min.js")])}
+  catch(e){showGate("error","Could not reach the internet to open your records. Check the connection and try again.");return new Promise(()=>{})}
+  firebase.initializeApp(CFG);
+  auth=firebase.auth();fs=firebase.firestore();
+  try{fs.settings({ignoreUndefinedProperties:true,merge:true})}catch(e){}
+  try{await fs.enablePersistence({synchronizeTabs:true})}catch(e){console.warn("Offline copy not available",e&&e.code)}
+  try{await auth.getRedirectResult()}catch(e){}
+  const user=await new Promise(res=>{const off=auth.onAuthStateChanged(u=>{if(u){off();res(u)}else showGate("signin","Sign in with your Google account to open your farm records. They stay private to you and appear on every phone or laptop where you sign in.")})});
+  uid=user.uid;email=user.email||"";
+  hideGate();addHeaderUI();
+})();
+window.claude={use:async n=>{await ready;return n==="db"?db:n==="user"?{can:async()=>true,isOwner:async()=>true,canEdit:async()=>true}:n==="assets"?assets:n==="downloads"?downloads:null}};
 })();
 </script>
 <title>Broiler Flock Ledger</title>
@@ -211,6 +304,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent);outline:none}
 .stepper{display:flex;align-items:center;border:1px solid var(--line);border-radius:5px;width:max-content;background:var(--bg)}
 .stepper button{border:0;background:none;width:44px;height:44px;font-size:1.2rem;cursor:pointer}
 .stepper output{min-width:34px;text-align:center;font-family:var(--f-mono);font-size:1.1rem}
+/* closed-cycle reading banner + list */
+.archbar{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;background:var(--info-soft);color:var(--ink);border:1px solid var(--info);border-radius:var(--r);padding:12px 14px;font-size:.9rem}
+.archbar>div{flex:1 1 220px}
+.arcrow{display:flex;align-items:center;gap:12px;padding:11px 0;border-top:1px solid var(--line)}
+.arcrow:first-child{border-top:0;padding-top:0}
+.arcrow>div{flex:1;min-width:0}
 /* tap-to-log buttons */
 .qgroup{margin-top:14px}
 .qgroup .eyebrow{margin-bottom:7px}
@@ -437,13 +536,25 @@ const CHECK_ITEMS=[
  ["deaths","Any deaths logged in the Daily log"],
  ["meds","Medicine or vitamins given today logged in Dosing"]
 ];
-const S={setup:null,daily:{},feed:[],meds:[],doses:[],todos:[],cycles:[],checks:{},photos:[],materials:[],expenses:[],sales:[],buyers:[],weighins:[],vaccines:[],loaded:new Set()};
+// L is the live store (filled by onSnapshot). S is what the pages show: L, or a closed
+// cycle from the archive when the farmer opens one to read (see archStore / viewArch).
+const L={setup:null,daily:{},feed:[],meds:[],doses:[],todos:[],cycles:[],checks:{},photos:[],materials:[],expenses:[],sales:[],buyers:[],weighins:[],vaccines:[],archive:[],loaded:new Set()};
+let S=L;
+let viewArch=null, liveCanWrite=null;
+// Sections that belong to one cycle: saved into the archive and cleared when a new cycle starts.
+const CYCLE_COLS=["feed","meds","doses","todos","photos","expenses","sales","weighins","vaccines"];
+function archStore(a){
+  const o={closedOn:a.closedOn||null,setup:a.setup||null,daily:a.daily||{},checks:a.checks||{},materials:L.materials,buyers:L.buyers,cycles:L.cycles,archive:L.archive,loaded:L.loaded};
+  CYCLE_COLS.forEach(c=>o[c]=Array.isArray(a[c])?a[c]:[]);
+  return o;
+}
 let showAllDays=false;
 let assets=null, pending=null, modalDay=null, lbList=[], lbIdx=0;
 let db=null, canWrite=true, writeUnknown=false, downloads=null, tab=(location.hash||"").slice(1);
 if(!TABS.some(t=>t[0]===tab)) tab="overview";
 let dailyFilter={q:"",deathsOnly:false};
 let quick=null; // today's unsaved quick-log taps, kept across redraws
+let ncDraft={}; // what is typed in the "Start a new cycle" form, kept across redraws
 let calc={litres:5,stage:"grower"};
 let scen=null;
 
@@ -501,7 +612,7 @@ function derive(){
   const st=S.setup||{};
   const start=parse(st.startDate);
   const cycleDays=num(st.cycleDays)||45;
-  const today=todayMs();
+  const today=S.closedOn&&parse(S.closedOn)!=null?parse(S.closedOn):todayMs(); // a closed cycle stays as it was on its last day
   const dayNow=start!=null?Math.floor((today-start)/DAY)+1:null;
   const saleMs=start!=null?start+(cycleDays-1)*DAY:null;
   const chicks=num(st.chicks), bonus=num(st.bonusChicks), flock=chicks+bonus;
@@ -612,7 +723,7 @@ function alerts(M){
 
 /* ---------- chrome ---------- */
 function renderTop(M){
-  $("#cycName").textContent=S.setup?`${S.setup.cycleName||"Cycle"} · started ${fd(M.start,1)}`:"No setup yet";
+  $("#cycName").textContent=S.setup?`${S.setup.cycleName||"Cycle"}${viewArch?" (closed)":""} · started ${fd(M.start,1)}`:"No setup yet";
   const r=$("#ruler"),lab=$("#rulerlab");
   let h="";for(const d of M.days){let c=[];if(M.dayNow!=null&&d.day<M.dayNow)c.push("past");if(d.day===M.dayNow)c.push("today");if(d.deaths)c.push("death");if(d.day%7===1&&d.day>1)c.push("wk");if(d.day===M.cycleDays)c.push("sale");h+=`<span class="${c.join(" ")}"></span>`}
   r.innerHTML=h;r.style.gridTemplateColumns=`repeat(${M.cycleDays},1fr)`;
@@ -998,8 +1109,11 @@ function vYear(M){
   const showCur=cur&&!done.some(c=>c.start===S.setup.startDate);
   const all=showCur?[...rows,cur]:rows;
   const tc=all.reduce((a,r)=>a+r.cost,0),tr=all.reduce((a,r)=>a+r.revenue,0);
+  const arcs=[...L.archive].sort((a,b)=>num(b.cycle)-num(a.cycle));
   return `
-  <div class="vhead"><div><h2>Year view</h2><p>A 45-day cycle plus about a week to clean leaves room for 6–7 cycles a year in the same space. Close each cycle when it is sold to keep its final numbers here.</p></div><span class="spacer"></span>${canWrite&&S.setup?`<button class="btn" type="button" data-act="closeCycle">Save current cycle's results</button>`:""}${canWrite?`<button class="btn pri" type="button" data-add="cycles">Add a cycle</button>`:""}</div>
+  <div class="vhead"><div><h2>Year view</h2><p>A 45-day cycle plus about a week to clean leaves room for 6–7 cycles a year in the same space. When a cycle is sold, start the next one from Setup. The old one is saved here.</p></div><span class="spacer"></span>${canWrite&&S.setup?`<button class="btn" type="button" data-go="setup">Start a new cycle</button>`:""}${canWrite?`<button class="btn pri" type="button" data-add="cycles">Add a cycle</button>`:""}</div>
+  ${arcs.length?`<section class="panel"><h3>Closed cycles<span class="spacer"></span><span class="muted" style="font-weight:400;font-size:.8rem">open one to read all its records</span></h3><div class="alerts">${arcs.map(a=>{const s=a.summary||{};const p=num(s.revenue)-num(s.cost);
+    return `<div class="arcrow"><div><b>${esc(a.name||"Cycle "+num(a.cycle))}</b><div class="muted" style="font-size:.82rem">${fd(parse(a.start),1)} to ${fd(parse(a.closedOn),1)} · ${num(s.birds)} birds · ${num(s.deaths)} died · ${num(s.sold)} sold · profit <span style="color:var(${p<0?"--crit":"--ink2"})">${k(p)} RWF</span></div></div><button class="btn sm" type="button" data-act="viewArch" data-id="${esc(a._id)}">${viewArch===a._id?"Reading now":"Open"}</button></div>`}).join("")}</div></section>`:""}
   <section class="panel"><div class="tw"><table><thead><tr><th>Cycle</th><th>Start</th><th class="n">Chicks</th><th class="n">Deaths</th><th class="n">Death rate</th><th class="n">Cost (RWF)</th><th class="n">Revenue (RWF)</th><th class="n">Profit (RWF)</th></tr></thead><tbody>
   ${all.map(r=>`<tr class="${r.live||!canWrite?"":"click"}" ${r._id?`data-edit="cycles" data-id="${esc(r._id)}"`:""}><td><b>${esc(r.cycle)}</b> ${r.live?'<span class="chip info">in progress, projected</span>':""}</td><td class="mono">${fd(parse(r.start),1)}</td><td class="n">${r.chicks}</td><td class="n">${r.deaths}</td><td class="n">${pct(r.mort)}</td><td class="n">${k(r.cost)}</td><td class="n">${k(r.revenue)}</td><td class="n" style="color:var(${r.revenue-r.cost<0?"--crit":"--ink"})">${k(r.revenue-r.cost)}</td></tr>`).join("")||`<tr><td colspan="8" class="muted">No cycles yet.</td></tr>`}
   </tbody><tfoot><tr class="tot"><td colspan="5">Total for the year</td><td class="n">${k(tc)}</td><td class="n">${k(tr)}</td><td class="n">${k(tr-tc)}</td></tr></tfoot></table></div></section>
@@ -1359,7 +1473,7 @@ function vSetup(M){
     ${f("coopShare","Coop and equipment share this cycle (RWF)","number","Shavings, charcoal, drinkers")}
     <div class="field wide"><label for="su_notes">Notes</label><textarea id="su_notes" ${canWrite?"":"disabled"}>${esc(st.notes||"")}</textarea></div>
   </div>${canWrite?`<div style="margin-top:14px"><button class="btn pri" type="button" data-act="saveSetup">Save setup</button></div>`:""}</section>
-  ${dataChecks(M)}`;
+  ${M.dayNow!=null&&M.dayNow>M.cycleDays?newCyclePanel(M)+dataChecks(M):dataChecks(M)+newCyclePanel(M)}`;
 }
 // Known data questions from the brief — surfaced for the farmer to confirm, never changed automatically.
 function dataChecks(M){
@@ -1383,15 +1497,79 @@ function emptyState(){
 
 /* ---------- render ---------- */
 function render(){
+  const arch=viewArch?L.archive.find(a=>a._id===viewArch):null;
+  if(viewArch&&!arch)exitArch();
+  S=arch?archStore(arch):L;
   const M=derive();
   renderTop(M);
   const v={overview:vOverview,daily:vDaily,growth:vGrowth,expenses:vExpenses,sales:vSales,report:vReport,photos:vPhotos,materials:vMaterials,health:vHealth,feed:vFeed,money:vMoney,tasks:vTasks,year:vYear,guide:vGuide,setup:vSetup}[tab];
   const active=document.activeElement, aid=active&&active.id, sel=active&&active.selectionStart;
-  $("#view").innerHTML=v(M);
+  const bar=arch?`<div class="archbar" role="status"><div><b>You are reading ${esc(arch.name||"Cycle "+num(arch.cycle))}</b>, which is closed. Nothing here can be changed.</div><button class="btn pri sm" type="button" data-act="exitArch">Back to ${esc(L.setup?.cycleName||"the current cycle")}</button></div>`:"";
+  $("#view").innerHTML=bar+v(M);
   const mp=document.getElementById("mPhotos");if(mp&&modalDay&&$("#dlg").open&&!mp.contains(document.activeElement))mp.innerHTML=dayPhotoPanel(modalDay);
   if(aid){const el=document.getElementById(aid);if(el){el.focus();try{if(sel!=null)el.setSelectionRange(sel,sel)}catch(e){}}}
 }
 let rq=0;function schedule(){if(rq)return;rq=requestAnimationFrame(()=>{rq=0;render()})}
+function enterArch(id){if(!viewArch)liveCanWrite=canWrite;viewArch=id;canWrite=false;quick=null;tab="overview";render();window.scrollTo({top:0})}
+function exitArch(){if(viewArch){viewArch=null;canWrite=liveCanWrite??canWrite;liveCanWrite=null}}
+
+/* ---------- start a new cycle ---------- */
+// Saves the whole current cycle into the "archive" collection (one doc, read back by archStore),
+// adds its results to the Year view, then clears the cycle's own records and resets Setup.
+// Kept for the next cycle: materials, buyers, undone reminders, medicine list (cost set to 0,
+// because it was already counted in the closed cycle), and medicine/material photos.
+function nextCycleNo(){return Math.max(0,...L.cycles.map(c=>num(c.cycle)),...L.archive.map(a=>num(a.cycle)))+1}
+function curCycleNo(){const c=L.cycles.find(x=>x.start===L.setup?.startDate);return c?num(c.cycle):nextCycleNo()}
+async function startNewCycle(){
+  const M=derive();const st=L.setup;if(!st)return;
+  const n=curCycleNo(), name=st.cycleName||("Cycle "+n);
+  const nv={name:$("#nc_name").value.trim()||("Cycle "+(n+1)),start:$("#nc_start").value,chicks:$("#nc_chicks").value,bonus:$("#nc_bonus").value,price:$("#nc_price").value};
+  if(!parse(nv.start)){toast("Enter the date the new chicks arrive.");return}
+  if(nv.start<=st.startDate){toast("The new cycle must start after "+fd(parse(st.startDate),1)+".");return}
+  const arch={cycle:n,name,start:st.startDate,closedOn:iso(todayMs()),setup:{...st},daily:L.daily,checks:L.checks,
+    summary:{birds:M.flock,deaths:M.deaths,sold:M.soldBirds,soldKg:M.soldKg,cost:M.totalCost,revenue:M.revenue,profit:M.profit,salesAmt:M.salesAmt,owed:M.owed}};
+  CYCLE_COLS.forEach(c=>arch[c]=L[c].map(x=>({...x})));
+  const btn=$("#nc_go");if(btn){btn.disabled=true;btn.textContent="Saving "+name+"…"}
+  try{
+    // 1. save the old cycle first; nothing is deleted unless this works
+    await db.collection("archive").doc("cycle-"+n).set(arch);
+    const ex=L.cycles.find(c=>c.start===st.startDate);
+    await db.collection("cycles").doc(ex?ex._id:"cycle-"+n).set({cycle:n,start:st.startDate,chicks:M.chicks,bonus:M.bonus,deaths:M.deaths,cost:M.totalCost,revenue:M.revenue,archived:true,notes:(num(st.actualWeight)||M.soldKg?"Final":"Projected")+" · "+M.soldBirds+" birds sold"});
+    // 2. clear this cycle's own records
+    const del=[];
+    Object.keys(L.daily).forEach(id=>del.push(db.collection("daily").doc(id).delete()));
+    Object.keys(L.checks).forEach(id=>del.push(db.collection("checks").doc(id).delete()));
+    ["feed","doses","expenses","sales","weighins","vaccines"].forEach(c=>L[c].forEach(r=>del.push(db.collection(c).doc(r._id).delete())));
+    L.todos.filter(t=>t.done).forEach(r=>del.push(db.collection("todos").doc(r._id).delete()));
+    L.photos.filter(p=>p.kind==="day"||p.kind==="other").forEach(r=>del.push(db.collection("photos").doc(r._id).delete()));
+    await Promise.all(del);
+    // 3. medicine list carries over; its cost stays with the closed cycle
+    await Promise.all(L.meds.map(m=>{const o={...m};delete o._id;if(num(o.cost)){o.notes=(`Bought in ${name} for ${k(num(o.cost))} RWF. `+(o.notes||"")).trim()}o.cost=0;return db.collection("meds").doc(m._id).set(o)}));
+    // 4. new setup
+    const ns={...st,cycleName:nv.name,startDate:nv.start,actualWeight:null,feedLeftKg:null,otherCosts:0,notes:""};
+    ["chicks","bonus","price"].forEach(f=>{const key={chicks:"chicks",bonus:"bonusChicks",price:"pricePerChick"}[f];if(nv[f]!=="")ns[key]=Number(nv[f])});
+    await db.doc("farm/setup").set(ns);
+    quick=null;scen=null;ncDraft={};tab="overview";render();window.scrollTo({top:0});
+    toast(nv.name+" started. "+name+" is saved in Year view.");
+  }catch(err){writeFail(err);if(btn){btn.disabled=false;btn.textContent="Try again"}}
+}
+function newCyclePanel(M){
+  if(!canWrite||!S.setup)return"";
+  const n=curCycleNo(), name=S.setup.cycleName||("Cycle "+n);
+  const past=M.dayNow!=null&&M.dayNow>M.cycleDays;
+  const v=(id,def)=>esc(ncDraft[id]??def??"");
+  return `<section class="panel" id="newCycle"><h3>Start a new cycle${past?`<span class="chip info">${esc(name)} has passed day ${M.cycleDays}</span>`:""}</h3>
+  <p class="muted" style="margin:-4px 0 12px;max-width:70ch">This saves ${esc(name)} with all its records and photos. You can still open and read it from Year view. The new cycle starts clean: day 1, no deaths, no feed or sales yet. Your materials, buyers, medicine list and unfinished reminders carry over. Medicine costs stay with ${esc(name)}, so they are set to 0 in the list.</p>
+  <div class="fgrid">
+    <div class="field"><label for="nc_name">New cycle name</label><input type="text" id="nc_name" value="${v("nc_name","Cycle "+(n+1))}"></div>
+    <div class="field"><label for="nc_start">Date the new chicks arrive</label><input type="date" id="nc_start" value="${v("nc_start",iso(todayMs()))}"></div>
+    <div class="field"><label for="nc_chicks">Chicks bought</label><input type="number" inputmode="numeric" id="nc_chicks" value="${v("nc_chicks",S.setup.chicks)}"></div>
+    <div class="field"><label for="nc_bonus">Free or bonus chicks</label><input type="number" inputmode="numeric" id="nc_bonus" value="${v("nc_bonus",S.setup.bonusChicks)}"></div>
+    <div class="field"><label for="nc_price">Price per chick (RWF)</label><input type="number" inputmode="numeric" id="nc_price" value="${v("nc_price",S.setup.pricePerChick)}"></div>
+  </div>
+  ${M.owed>0||M.onHand>0?`<div class="alerts" style="margin-top:14px">${M.owed>0?`<div class="alert"><span class="chip warn">Before you close</span><b>Buyers still owe ${k(M.owed)} RWF</b><p>A closed cycle cannot be changed. If any of this is paid, record it in <button type="button" class="btn ghost sm" data-go="sales" style="padding:0 2px;vertical-align:baseline">Sales & buyers ›</button> first.</p></div>`:""}${M.onHand>0?`<div class="alert"><span class="chip warn">Before you close</span><b>${M.onHand} bird${M.onHand===1?"":"s"} still on the farm</b><p>If that number is wrong, fix the Daily log or Sales first so ${esc(name)}'s results are right.</p></div>`:""}</div>`:""}
+  <div style="margin-top:14px"><button class="btn pri" type="button" id="nc_go" data-act="newCycle" data-lbl="Close ${esc(name)} and start the new cycle" style="min-height:44px;white-space:normal">Close ${esc(name)} and start the new cycle</button></div></section>`;
+}
 
 /* ---------- forms ---------- */
 const FORMS={
@@ -1471,6 +1649,9 @@ function editDaily(day){
 
 /* ---------- events ---------- */
 document.addEventListener("click",async e=>{
+  // a closed cycle is read-only: only looking at photos and moving between pages works
+  if(viewArch){const w=e.target.closest("[data-add],[data-edit],[data-day],[data-upload],[data-dayph],[data-delph],[data-gotit],[data-vaxgiven],[data-step],[data-tag],[data-seg]");if(w){e.stopPropagation();return}
+    const a=e.target.closest("[data-act]");if(a&&!["exitArch","viewArch","toggleDays","dlReport"].includes(a.dataset.act))return}
   const pv=e.target.closest("[data-view],[data-upload],[data-dayph],[data-delph]");
   if(pv){e.stopPropagation();
     if(pv.dataset.view){const p=S.photos.find(x=>x._id===pv.dataset.view);if(!p)return;const list=p.kind==="day"?S.photos.filter(x=>x.kind==="day").sort((a,b)=>num(a.day)-num(b.day)||String(a.createdAt).localeCompare(String(b.createdAt))):p.kind==="med"?photosFor("med",p.medId):p.kind==="material"?photosFor("material",p.materialId):photosFor("other");openLB(list,Math.max(0,list.indexOf(p)));return}
@@ -1501,6 +1682,9 @@ document.addEventListener("click",async e=>{
   if(t.dataset.day&&canWrite!==false){editDaily(+t.dataset.day);return}
   if(t.dataset.step){const o=$("#qDeaths");o.textContent=Math.max(0,num(o.textContent)+(+t.dataset.step));quick=readQuick();render();return}
   const act=t.dataset.act;
+  if(act==="viewArch"){enterArch(t.dataset.id);return}
+  if(act==="exitArch"){exitArch();tab="year";render();window.scrollTo({top:0});return}
+  if(act==="newCycle"){if(!t.dataset.armed){t.dataset.armed="1";t.textContent="Tap again to confirm";const lbl=t.dataset.lbl||"";setTimeout(()=>{if(t.isConnected&&t.dataset.armed&&!t.disabled){delete t.dataset.armed;t.textContent=lbl}},6000);return}await startNewCycle();return}
   if(act==="loadVax"){const M=derive();const w=VAX_TEMPLATE.map(([day,disease,vaccine,route,notes],i)=>db.collection("vaccines").doc("vax-"+(i+1)).set({day,disease,vaccine,route,notes,status:M.dayNow!=null&&day<M.dayNow?"Not recorded":"Planned",dateGiven:""}));
     try{for(const p of w)await p;toast("Common plan loaded. Check it with the RAB office or a vet.")}catch(err){writeFail(err)}return}
   if(act==="moveOther"){const M=derive();try{await db.collection("expenses").doc().set({date:S.setup.startDate,category:"Other",text:"Other costs moved from Setup",amount:M.other,paidTo:"",notes:"Was entered in Setup as other costs"});const o={...S.setup};delete o._id;o.otherCosts=0;await db.doc("farm/setup").set(o);toast("Moved to the expenses book")}catch(err){writeFail(err)}return}
@@ -1523,6 +1707,7 @@ document.addEventListener("click",async e=>{
 });
 document.addEventListener("change",async e=>{
   const t=e.target;
+  if(viewArch&&(t.dataset.check||t.dataset.todo||t.dataset.moveph||t.dataset.cap||t.id==="filePick"))return;
   if(t.id==="filePick"&&pending&&t.files.length){const tg=pending;pending=null;await uploadFiles([...t.files],tg);return}
   if(t.dataset.moveph&&db){const p=S.photos.find(x=>x._id===t.dataset.moveph);const M=derive();const n=Math.round(num(t.value));if(p&&n>=1&&n<=M.cycleDays&&n!==num(p.day)){const o={...p};delete o._id;o.day=n;o.date=iso(M.start+(n-1)*DAY);try{await db.collection("photos").doc(p._id).set(o);toast("Moved to day "+n)}catch(err){writeFail(err)}}return}
   if(t.dataset.cap&&db){const p=S.photos.find(x=>x._id===t.dataset.cap);if(p){const o={...p};delete o._id;o.caption=t.value.trim();try{await db.collection("photos").doc(p._id).set(o)}catch(err){writeFail(err)}}return}
@@ -1538,6 +1723,7 @@ document.addEventListener("input",e=>{
   const t=e.target;
   if(t.id==="dq"){dailyFilter.q=t.value;render()}
   if((t.id==="qNotes"||t.id==="q_temp")&&$("#qDeaths"))quick=readQuick();
+  if(t.id&&t.id.startsWith("nc_"))ncDraft[t.id]=t.value;
   if(t.id==="cL"){const v=num(t.value);if(v>0){calc.litres=v;render()}}
   const map={sBirds:"birds",sWeight:"weight",sPrice:"price",sBags:"bags"};
   if(map[t.id]&&scen){const o=$("#"+t.id+"o");const v=Number(t.value);if(o)o.textContent=t.id==="sWeight"?v.toFixed(2)+" kg":t.id==="sPrice"?k(v)+" RWF":t.id==="sBags"?v+" bags":String(v)}
@@ -1614,11 +1800,11 @@ render();
   if(user){try{const c=await user.can("data.write");canWrite=c!==false;writeUnknown=c===null}catch(_){}}
   setSync("","Syncing");
   const onErr=e=>{setSync("bad",e&&e.code==="revoked"?"Access changed":"Sync stopped")};
-  const mark=n=>{S.loaded.add(n);if(S.loaded.size>=15)setSync("ok",window.__assetURL?"Saved on this device":(canWrite===false?"View only":"Saved and synced"));schedule()};
-  db.doc("farm/setup").onSnapshot(s=>{S.setup=s.exists?{...s.data()}:null;mark("setup")},onErr);
-  db.collection("daily").onSnapshot(q=>{const o={};q.docs.forEach(d=>o[d.id]={...d.data()});S.daily=o;mark("daily")},onErr);
-  ["feed","meds","doses","todos","cycles","photos","materials","expenses","sales","buyers","weighins","vaccines"].forEach(c=>db.collection(c).onSnapshot(q=>{S[c]=q.docs.map(d=>({...d.data(),_id:d.id}));mark(c)},onErr));
-  db.collection("checks").onSnapshot(q=>{const o={};q.docs.forEach(d=>o[d.id]={...d.data()});S.checks=o;mark("checks")},onErr);
+  const mark=n=>{L.loaded.add(n);if(L.loaded.size>=16)setSync("ok",window.__storageLabel?window.__storageLabel():window.__assetURL?"Saved on this device":((liveCanWrite??canWrite)===false?"View only":"Saved and synced"));schedule()};
+  db.doc("farm/setup").onSnapshot(s=>{L.setup=s.exists?{...s.data()}:null;mark("setup")},onErr);
+  db.collection("daily").onSnapshot(q=>{const o={};q.docs.forEach(d=>o[d.id]={...d.data()});L.daily=o;mark("daily")},onErr);
+  ["feed","meds","doses","todos","cycles","photos","materials","expenses","sales","buyers","weighins","vaccines","archive"].forEach(c=>db.collection(c).onSnapshot(q=>{L[c]=q.docs.map(d=>({...d.data(),_id:d.id}));mark(c)},onErr));
+  db.collection("checks").onSnapshot(q=>{const o={};q.docs.forEach(d=>o[d.id]={...d.data()});L.checks=o;mark("checks")},onErr);
 })();
 })();
 </script>
