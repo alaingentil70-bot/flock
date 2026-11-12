@@ -74,7 +74,7 @@ function showGate(state,text){
   const btn=state==="signin"?`<button type="button" class="btn pri" id="gateBtn" style="min-height:46px;padding-inline:22px;font-size:1rem">Sign in with Google</button>`:state==="error"?`<button type="button" class="btn pri" id="gateReload" style="min-height:46px;padding-inline:22px">Try again</button>`:"";
   gate.innerHTML=`<div style="max-width:380px;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center">
     <div style="font-family:var(--f-display,system-ui);font-weight:800;font-stretch:75%;font-size:1.9rem;letter-spacing:.01em;text-transform:uppercase">Broiler Flock Ledger</div>
-    <p style="margin:0;color:var(--ink2,#465042);line-height:1.5">${text}</p>${btn}</div>`;
+    <p style="margin:0;color:var(--ink2,#465042);line-height:1.5">${text}</p>${btn}<p id="gateHelp" role="status" style="margin:0;min-height:1.4em;color:var(--warn,#9A6500);font-weight:600;line-height:1.45"></p></div>`;
   const b=document.getElementById("gateBtn");if(b)b.onclick=signIn;
   const r=document.getElementById("gateReload");if(r)r.onclick=()=>location.reload();
   gate.hidden=false;
@@ -83,10 +83,16 @@ function hideGate(){if(gate)gate.hidden=true}
 async function signIn(){
   const p=new firebase.auth.GoogleAuthProvider();p.setCustomParameters({prompt:"select_account"});
   const b=document.getElementById("gateBtn");if(b){b.disabled=true;b.textContent="Opening Google…"}
+  // Pop-up only: the redirect way loses the sign-in on browsers that block cross-site storage
+  // (the page is on github.io, the sign-in helper on firebaseapp.com).
   try{await auth.signInWithPopup(p)}
   catch(e){
-    if(e&&(e.code==="auth/popup-blocked"||e.code==="auth/operation-not-supported-in-this-environment")){try{await auth.signInWithRedirect(p);return}catch(e2){e=e2}}
-    if(e&&e.code!=="auth/popup-closed-by-user"&&e.code!=="auth/cancelled-popup-request")msg("Sign-in did not work: "+(e.code||"error"));
+    const c=e&&e.code;
+    const help=c==="auth/popup-blocked"?"Your browser blocked the Google window. Allow pop-ups for this site, then tap Sign in again.":
+      c==="auth/operation-not-supported-in-this-environment"||c==="auth/web-storage-unsupported"?"Sign-in does not work inside this app's browser. Open the link in Chrome (menu ⋮ → Open in Chrome), then sign in.":
+      c==="auth/network-request-failed"?"No internet connection. Connect and try again.":
+      c==="auth/popup-closed-by-user"||c==="auth/cancelled-popup-request"?"":"Sign-in did not work ("+(c||"error")+"). Try again.";
+    const h=document.getElementById("gateHelp");if(h)h.textContent=help;
     if(b){b.disabled=false;b.textContent="Sign in with Google"}
   }
 }
@@ -153,7 +159,6 @@ const ready=(async()=>{
   auth=firebase.auth();fs=firebase.firestore();
   try{fs.settings({ignoreUndefinedProperties:true,merge:true})}catch(e){}
   try{await fs.enablePersistence({synchronizeTabs:true})}catch(e){console.warn("Offline copy not available",e&&e.code)}
-  try{await auth.getRedirectResult()}catch(e){}
   const user=await new Promise(res=>{const off=auth.onAuthStateChanged(u=>{if(u){off();res(u)}else showGate("signin","Sign in with your Google account to open your farm records. They stay private to you and appear on every phone or laptop where you sign in.")})});
   uid=user.uid;email=user.email||"";
   hideGate();addHeaderUI();
