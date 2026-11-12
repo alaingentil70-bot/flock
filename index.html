@@ -1367,7 +1367,9 @@ function vExpenses(M){
 function vSales(M){
   if(!S.setup)return emptyState();
   const rows=[...S.sales].sort((a,b)=>(parse(b.date)??0)-(parse(a.date)??0));
-  const agg={};S.sales.forEach(s=>{const n=(s.buyer||"Walk-in").trim()||"Walk-in";const a=agg[n]=agg[n]||{birds:0,kg:0,amt:0,paid:0,n:0};a.birds+=num(s.birds);a.kg+=num(s.kg);a.amt+=saleAmt(s);a.paid+=num(s.paid);a.n++});
+  // one row per buyer, matching names whatever the capital letters ("NEighbor" = "Neighbor")
+  const agg={},bName=n=>{const b=S.buyers.find(x=>buyerKey(x.name)===buyerKey(n));return b?b.name:n};
+  S.sales.forEach(s=>{const n=bName((s.buyer||"Walk-in").trim()||"Walk-in");const a=agg[n]=agg[n]||{birds:0,kg:0,amt:0,paid:0,n:0};a.birds+=num(s.birds);a.kg+=num(s.kg);a.amt+=saleAmt(s);a.paid+=num(s.paid);a.n++});
   S.buyers.forEach(b=>{agg[b.name]=agg[b.name]||{birds:0,kg:0,amt:0,paid:0,n:0}});
   const buyerRows=Object.entries(agg).sort((a,b)=>b[1].amt-a[1].amt).map(([n,a])=>{const b=S.buyers.find(x=>x.name===n);const owed=a.amt-a.paid;return `<tr class="${canWrite&&b?"click":""}" ${b?`data-edit="buyers" data-id="${esc(b._id)}"`:""}><td><b>${esc(n)}</b>${b&&(b.phone||b.place)?`<div class="muted" style="font-size:.76rem">${esc([b.phone,b.place].filter(Boolean).join(" · "))}</div>`:""}${b?.notes?`<div class="muted" style="font-size:.76rem">${esc(b.notes)}</div>`:""}</td><td class="n">${a.n}</td><td class="n">${a.birds}</td><td class="n">${a.kg?a.kg.toFixed(1):"—"}</td><td class="n">${k(a.amt)}</td><td class="n">${owed>0?`<span class="dz">${k(owed)}</span>`:"0"}</td></tr>`}).join("");
   return `
@@ -1385,6 +1387,22 @@ function vSales(M){
   <p class="muted" style="font-size:.8rem;margin:10px 0 0">Selling tips from your notes: state your price first, keep regular buyers happy with steady quality, do not panic-sell, and never sell swollen or sick birds or birds still inside a medicine withdrawal period (safe after ${M.latestSafe!=null?fd(M.latestSafe,1):"—"}).</p></section>`;
 }
 function saleAmt(s){return num(s.amount)||num(s.kg)*num(s.pricePerKg)}
+// Everyone named on a sale (this cycle or a closed one) is kept on the buyers list.
+// Missing ones are added with a fixed id from their name, so two devices never make doubles.
+const buyerKey=n=>String(n||"").trim().toLowerCase().replace(/\s+/g," ");
+const buyerDocId=n=>"b-"+buyerKey(n).replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,60);
+const buyerAdding=new Set();
+function syncBuyers(){
+  if(!db||viewArch||(liveCanWrite??canWrite)===false)return;
+  const have=new Set(L.buyers.map(b=>buyerKey(b.name)));
+  const found=new Map();
+  const note=(s,where)=>{const n=String(s.buyer||"").trim();const key=buyerKey(n);if(!n||key==="walk-in"||have.has(key)||found.has(key)||buyerAdding.has(key))return;found.set(key,{name:n,date:s.date,where})};
+  L.sales.forEach(s=>note(s,""));
+  L.archive.forEach(a=>(a.sales||[]).forEach(s=>note(s,a.name||"")));
+  found.forEach(({name,date,where},key)=>{buyerAdding.add(key);
+    db.collection("buyers").doc(buyerDocId(name)).set({name,phone:"",place:"",notes:`Added from a sale${where?" in "+where:""}${parse(date)!=null?" on "+fd(parse(date),1):""}. Add a phone number.`})
+      .catch(()=>{}).finally(()=>buyerAdding.delete(key))});
+}
 
 /* ---------- vaccination ---------- */
 const VAX_TEMPLATE=[
@@ -1805,7 +1823,7 @@ render();
   if(user){try{const c=await user.can("data.write");canWrite=c!==false;writeUnknown=c===null}catch(_){}}
   setSync("","Syncing");
   const onErr=e=>{setSync("bad",e&&e.code==="revoked"?"Access changed":"Sync stopped")};
-  const mark=n=>{L.loaded.add(n);if(L.loaded.size>=16)setSync("ok",window.__storageLabel?window.__storageLabel():window.__assetURL?"Saved on this device":((liveCanWrite??canWrite)===false?"View only":"Saved and synced"));schedule()};
+  const mark=n=>{L.loaded.add(n);if(L.loaded.size>=16)syncBuyers();if(L.loaded.size>=16)setSync("ok",window.__storageLabel?window.__storageLabel():window.__assetURL?"Saved on this device":((liveCanWrite??canWrite)===false?"View only":"Saved and synced"));schedule()};
   db.doc("farm/setup").onSnapshot(s=>{L.setup=s.exists?{...s.data()}:null;mark("setup")},onErr);
   db.collection("daily").onSnapshot(q=>{const o={};q.docs.forEach(d=>o[d.id]={...d.data()});L.daily=o;mark("daily")},onErr);
   ["feed","meds","doses","todos","cycles","photos","materials","expenses","sales","buyers","weighins","vaccines","archive"].forEach(c=>db.collection(c).onSnapshot(q=>{L[c]=q.docs.map(d=>({...d.data(),_id:d.id}));mark(c)},onErr));
