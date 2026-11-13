@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#FFFFFF"><link rel="apple-touch-icon" href="apple-touch-icon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Flock"></head><body>
 <script>window.__FIREBASE__={"apiKey": "AIzaSyB0rW2iQJBK0IqlVNTwliVLWalezYa2S34", "authDomain": "flock-ledger-452a4.firebaseapp.com", "projectId": "flock-ledger-452a4", "storageBucket": "flock-ledger-452a4.firebasestorage.app", "messagingSenderId": "904710850", "appId": "1:904710850:web:b1a529da4d04514019495b"};</script>
 <script>
 (function(){
@@ -72,7 +72,10 @@ function showGate(state,text){
     gate.style.cssText="position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px;background:var(--bg,#F2F4EE);color:var(--ink,#192017);font-family:var(--f-body,system-ui,sans-serif)";
     document.body.appendChild(gate)}
   const btn=state==="signin"?`<button type="button" class="btn pri" id="gateBtn" style="min-height:46px;padding-inline:22px;font-size:1rem">Sign in with Google</button>`:state==="error"?`<button type="button" class="btn pri" id="gateReload" style="min-height:46px;padding-inline:22px">Try again</button>`:"";
+  if(!gate.classList.contains("fieldbg"))gate.classList.add("fieldbg");
+  const logo=(document.querySelector(".brand .logo")||{}).outerHTML||"";
   gate.innerHTML=`<div style="max-width:380px;text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center">
+    <div style="transform:scale(1.9);margin:10px 0 8px">${logo}</div>
     <div style="font-family:var(--f-display,system-ui);font-weight:800;font-stretch:75%;font-size:1.9rem;letter-spacing:.01em;text-transform:uppercase">Broiler Flock Ledger</div>
     <p style="margin:0;color:var(--ink2,#465042);line-height:1.5">${text}</p>${btn}<p id="gateHelp" role="status" style="margin:0;min-height:1.4em;color:var(--warn,#9A6500);font-weight:600;line-height:1.45"></p></div>`;
   const b=document.getElementById("gateBtn");if(b)b.onclick=signIn;
@@ -148,6 +151,9 @@ function paintSync(){const el=document.getElementById("sync");if(el&&el.classLis
 addEventListener("online",paintSync);addEventListener("offline",paintSync);
 function msg(t){const e=document.createElement("div");e.className="toast";e.setAttribute("role","status");e.setAttribute("aria-live","polite");e.textContent=t;document.body.appendChild(e);setTimeout(()=>e.remove(),3200)}
 
+/* ---------- installable app: offline helper ---------- */
+if("serviceWorker" in navigator&&location.protocol==="https:"){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(e=>console.warn("Offline helper not installed",e)))}
+
 /* ---------- start up ---------- */
 const domReady=new Promise(r=>document.readyState==="loading"?document.addEventListener("DOMContentLoaded",r):r());
 const ready=(async()=>{
@@ -167,6 +173,7 @@ window.claude={use:async n=>{await ready;return n==="db"?db:n==="user"?{can:asyn
 })();
 </script>
 <title>Broiler Flock Ledger</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23A95F00'/%3E%3Cg fill='%23FFF6E6'%3E%3Cellipse cx='35' cy='41' rx='17' ry='13.5'/%3E%3Ccircle cx='24' cy='27' r='10'/%3E%3Cpath d='M49 33l8-8v16z'/%3E%3Cpath d='M14.5 25.5 7.5 28.5l7 3z'/%3E%3C/g%3E%3Ccircle cx='21.5' cy='25' r='1.9' fill='%23A95F00'/%3E%3C/svg%3E">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -503,13 +510,55 @@ dialog::backdrop{background:rgba(10,14,9,.45)}
 .lbbar p{margin:0;flex:1;min-width:0;font-size:.88rem;color:var(--ink2)}
 .upl{font-size:.8rem;color:var(--muted)}
 @media (prefers-reduced-motion:no-preference){.view{animation:fade .18s ease-out}@keyframes fade{from{opacity:.4;transform:translateY(3px)}to{opacity:1;transform:none}}}
+
+/* ---------- brand: logo, field-line pattern, greeting ---------- */
+.logo{width:34px;height:34px;flex:none;border-radius:9px;box-shadow:0 1px 0 color-mix(in srgb,var(--ink) 12%,transparent)}
+.brand{align-items:center}
+.brand .bt{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0}
+/* soft contour lines, like a ploughed field seen from above; drawn only with theme tokens */
+.fieldbg{position:relative;isolation:isolate}
+.fieldbg::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(90% 160% at 100% 0%,color-mix(in srgb,var(--accent-soft) 85%,transparent) 0,transparent 62%),
+    repeating-radial-gradient(circle at 108% -60%,transparent 0 23px,color-mix(in srgb,var(--line) 75%,transparent) 23px 24px);
+  -webkit-mask-image:linear-gradient(to left,#000 0,#000 30%,transparent 78%);mask-image:linear-gradient(to left,#000 0,#000 30%,transparent 78%)}
+.top.fieldbg::before{opacity:.9}
+.iconbtn{padding:5px 8px;line-height:0}
+.iconbtn svg{width:18px;height:18px}
+.hello{display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;overflow:hidden}
+.hello .hi{font:700 1.5rem/1.15 var(--f-display);font-stretch:85%;margin:2px 0 4px}
+.hello .hs{color:var(--ink2);font-size:.9rem}
+.hello .hb{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.hello.sale{border-color:var(--accent);background:var(--accent-soft)}
+.ring{width:78px;height:78px;display:block}
+.ring .rt{fill:none;stroke:var(--sunk);stroke-width:7}
+.ring .rv{fill:none;stroke:var(--accent);stroke-width:7;stroke-linecap:round;transform:rotate(-90deg);transform-origin:50% 50%}
+.ring .rn{font:700 21px var(--f-display);font-stretch:80%;fill:var(--ink);text-anchor:middle}
+.ring .rl{font:600 9px var(--f-body);letter-spacing:.08em;fill:var(--muted);text-anchor:middle;text-transform:uppercase}
+@media (max-width:560px){.top .brand{flex-wrap:nowrap;gap:10px}.logo{width:30px;height:30px;border-radius:8px}.brand .bt{row-gap:0}}
+@media (max-width:420px){.hello{gap:12px;padding:14px}.ring{width:64px;height:64px}.hello .hi{font-size:1.3rem}}
+@media (max-width:330px){.hello{grid-template-columns:1fr;justify-items:start}}
+
+/* ---------- motion ---------- */
+@media (prefers-reduced-motion:no-preference){
+  .view.enter>*{animation:rise .42s cubic-bezier(.2,.7,.2,1) both}
+  .view.enter>*:nth-child(2){animation-delay:.04s}.view.enter>*:nth-child(3){animation-delay:.08s}
+  .view.enter>*:nth-child(4){animation-delay:.12s}.view.enter>*:nth-child(5){animation-delay:.16s}.view.enter>*:nth-child(n+6){animation-delay:.2s}
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .ring .rv{transition:stroke-dashoffset .9s cubic-bezier(.2,.7,.2,1)}
+  .tabs button{transition:color .15s,border-color .15s}
+  .btn{transition:border-color .15s,filter .15s,transform .08s}
+  .btn:active{transform:translateY(1px)}
+}
+.confetti{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:90}
 </style>
 
-<header class="top">
+<header class="top fieldbg">
   <div class="wrap">
     <div class="brandrow">
-      <div class="brand"><h1>Broiler Flock Ledger</h1><span class="cyc" id="cycName">Loading records</span></div>
+      <div class="brand"><svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="var(--accent)"/><g fill="var(--accent-ink)"><ellipse cx="35" cy="41" rx="17" ry="13.5"/><circle cx="24" cy="27" r="10"/><path d="M49 33l8-8v16z"/><path d="M14.5 25.5 7.5 28.5l7 3z"/></g><circle cx="21.5" cy="25" r="1.9" fill="var(--accent)"/><path d="M30 41c4.5-5.8 11.5-5.8 15 0-4.8 3.8-10.4 3.8-15 0z" fill="var(--accent)" opacity=".3"/><path d="M17.5 18c.4-3.4 3.4-4.4 4.9-1.9.6-3.5 4.6-3.7 5.1-.3 1.8-1.5 4.3-.5 3.5 2.3" fill="none" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M29 54v5M38 54v5" stroke="var(--accent-ink)" stroke-width="2.4" stroke-linecap="round"/></svg><div class="bt"><h1>Broiler Flock Ledger</h1><span class="cyc" id="cycName">Loading records</span></div></div>
       <span class="spacer"></span>
+      <button class="btn sm ghost iconbtn" id="themeBtn" type="button" aria-label="Colour theme"></button>
       <span class="sync" id="sync"><i></i><span>Connecting</span></span>
       <button class="btn sm" id="exportBtn" type="button" hidden>Export to Excel</button>
     </div>
@@ -788,6 +837,37 @@ let activeXhair=null;
 function hideXhair(){if(activeXhair){activeXhair.setAttribute("visibility","hidden");activeXhair=null}}
 
 /* ---------- views ---------- */
+/* Greeting at the top of the Overview: time of day, a ring for how far the cycle has come,
+   one plain sentence about the flock, and small badges for good news. */
+function helloCard(M){
+  const h=new Date().getHours();
+  const hi=viewArch?"Looking back":h<12?"Good morning":h<17?"Good afternoon":"Good evening";
+  const farm=(S.setup&&S.setup.farmName)||"";
+  const d=M.dayNow, n=M.cycleDays;
+  const frac=d==null?0:Math.min(Math.max(d,0),n)/n;
+  const C=2*Math.PI*32;
+  const left=d!=null?n-d:null;
+  const isSale=!viewArch&&d===n, near=!viewArch&&left!=null&&left>0&&left<=3, before=d!=null&&d<1;
+  let msg, sub;
+  if(viewArch){msg=`${esc(S.setup.cycleName||"This cycle")} is closed`;sub=`${M.flock} birds placed · ${M.deaths} lost · ${M.soldBirds} sold`}
+  else if(before){msg=`The chicks arrive on ${fd(M.start,1)}`;sub="Get the room warm and the drinkers full the day before."}
+  else if(isSale){msg="Sale day";sub="Weigh a few birds first so the price per kg is right. Check that every medicine wait is over."}
+  else if(left!=null&&left<0){msg=`Day ${d}: the planned sale has passed`;sub=M.onHand?`${M.onHand} bird${M.onHand===1?"":"s"} still on the farm. Start the next cycle from Setup when they are sold.`:"All birds are sold. Start the next cycle from Setup."}
+  else{const lost=M.deaths;msg=lost===0?`All ${M.onHand} birds are alive`:`${M.onHand} birds on the farm`;
+    sub=`${near?`<b>${left} day${left===1?"":"s"} to the sale</b>`:`${left} days to the sale on ${fd(M.saleMs,1)}`}${lost?` · ${lost} lost so far`:""}`}
+  // good-news badges: weeks finished with no deaths, this cycle so far below the 2% goal
+  const badges=[];
+  if(d!=null&&!before){const fullWeeks=Math.floor(Math.min(d-1,n)/7);let clean=0;
+    for(let w=fullWeeks;w>=1;w--){if(M.days.slice((w-1)*7,w*7).some(x=>x.deaths))break;clean++}
+    if(clean>=1)badges.push(`<span class="chip good">${clean===1?`Week ${fullWeeks}`:`${clean} weeks in a row`}: no deaths</span>`);
+    if(d>=7&&M.mortality<=0.02&&M.flock)badges.push(`<span class="chip good">On the 2% goal</span>`)}
+  if(isSale)badges.push(`<span class="chip warn">Sale day</span>`);
+  if(near)badges.push(`<span class="chip info">Sale is close</span>`);
+  return `<section class="hello fieldbg ${isSale?"sale":""}">
+    <svg class="ring" viewBox="0 0 78 78" role="img" aria-label="Day ${d??0} of ${n}"><circle class="rt" cx="39" cy="39" r="32"/><circle class="rv" cx="39" cy="39" r="32" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C*(1-frac)).toFixed(1)}" data-ring="${(C*(1-frac)).toFixed(1)}"/><text class="rn" x="39" y="43">${d!=null&&d>=1?Math.min(d,n):"—"}</text><text class="rl" x="39" y="56">of ${n} days</text></svg>
+    <div><div class="eyebrow">${hi}${farm?" · "+esc(farm):""}</div><div class="hi">${msg}</div><div class="hs">${sub}</div>${badges.length?`<div class="hb">${badges.join("")}</div>`:""}</div>
+  </section>`;
+}
 function vOverview(M){
   if(!S.setup)return emptyState();
   const [ms,ml]=mortStatus(M.mortality);
@@ -817,12 +897,13 @@ function vOverview(M){
   const donext=al.slice(0,3),rest=al.slice(3);
   const lab={crit:"Critical",warn:"Check",info:"To do",good:"Good"};
   return `
+  ${helloCard(M)}
   <div class="hero">
     <div><div class="eyebrow">Cycle progress</div><div class="big">Day ${M.dayNow??"—"}<small> of ${M.cycleDays}</small></div>
       <div class="sub">${left!=null&&left>=0?`${left} days to the planned sale on <b>${fd(M.saleMs,1)}</b>`:left!=null?`Planned sale was ${fd(M.saleMs,1)}`:""}</div></div>
-    <div><div class="eyebrow">Birds on the farm</div><div class="mid">${M.onHand} <span class="muted" style="font-size:1rem">/ ${M.flock}</span></div><div class="sub">${M.soldBirds?`${M.soldBirds} sold · `:""}${M.deaths} lost · <span class="chip ${ms}">${pct(M.mortality)} · ${ml}</span></div></div>
+    <div><div class="eyebrow">Birds on the farm</div><div class="mid"><span data-count="${M.onHand}">${M.onHand}</span> <span class="muted" style="font-size:1rem">/ ${M.flock}</span></div><div class="sub">${M.soldBirds?`${M.soldBirds} sold · `:""}${M.deaths} lost · <span class="chip ${ms}">${pct(M.mortality)} · ${ml}</span></div></div>
     <div><div class="eyebrow">Safe to sell after</div><div class="mid">${M.latestSafe!=null?fd(M.latestSafe):"No wait"}</div><div class="sub">${M.latestSafe!=null&&M.saleMs!=null?(M.latestSafe>M.saleMs?'<span class="chip crit">Conflicts with sale date</span>':'<span class="chip good">Clears before sale</span>'):"No medicine withdrawal logged"}</div></div>
-    <div><div class="eyebrow">Projected profit</div><div class="mid">${k(M.profit)}</div><div class="sub">RWF at ${M.weight} kg × ${k(M.price)} RWF/kg</div></div>
+    <div><div class="eyebrow">Projected profit</div><div class="mid"><span data-count="${Math.round(M.profit)}" data-fmt="k">${k(M.profit)}</span></div><div class="sub">RWF at ${M.weight} kg × ${k(M.price)} RWF/kg</div></div>
   </div>
   ${wk?`<div class="week">
     <div><div class="eyebrow">This week · week ${wk}</div><div class="wn">${wkDays.length} day${wkDays.length===1?"":"s"} logged</div><div class="wl">days ${(wk-1)*7+1}–${Math.min(wk*7,M.cycleDays)}</div></div>
@@ -1529,11 +1610,55 @@ function render(){
   const active=document.activeElement, aid=active&&active.id, sel=active&&active.selectionStart;
   const bar=arch?`<div class="archbar" role="status"><div><b>You are reading ${esc(arch.name||"Cycle "+num(arch.cycle))}</b>, which is closed. Nothing here can be changed.</div><button class="btn pri sm" type="button" data-act="exitArch">Back to ${esc(L.setup?.cycleName||"the current cycle")}</button></div>`:"";
   $("#view").innerHTML=bar+v(M);
+  if(fxNext){fxNext=false;playEnter()}
   const mp=document.getElementById("mPhotos");if(mp&&modalDay&&$("#dlg").open&&!mp.contains(document.activeElement))mp.innerHTML=dayPhotoPanel(modalDay);
   if(aid){const el=document.getElementById(aid);if(el){el.focus();try{if(sel!=null)el.setSelectionRange(sel,sel)}catch(e){}}}
 }
 let rq=0;function schedule(){if(rq)return;rq=requestAnimationFrame(()=>{rq=0;render()})}
-function enterArch(id){if(!viewArch)liveCanWrite=canWrite;viewArch=id;canWrite=false;quick=null;tab="overview";render();window.scrollTo({top:0})}
+
+/* ---------- motion and small celebrations ---------- */
+// Only when the page itself changes (opening a tab, first load), never on a data refresh,
+// so numbers do not jump around while someone else is typing on another phone.
+let fxNext=false, fxLoaded=false;
+const calm=()=>window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+function playEnter(){
+  const v=$("#view");if(calm())return;
+  v.classList.remove("enter");void v.offsetWidth;v.classList.add("enter");setTimeout(()=>v.classList.remove("enter"),900);
+  // ring fills from empty
+  v.querySelectorAll("[data-ring]").forEach(c=>{const to=c.dataset.ring;c.style.transition="none";c.style.strokeDashoffset=c.getAttribute("stroke-dasharray");void c.getBoundingClientRect();c.style.transition="";requestAnimationFrame(()=>c.style.strokeDashoffset=to)});
+  // numbers count up
+  v.querySelectorAll("[data-count]").forEach(el=>{const to=Number(el.dataset.count);if(!isFinite(to)||Math.abs(to)<2)return;const fmt=el.dataset.fmt==="k"?k:x=>String(Math.round(x));
+    const t0=performance.now(),dur=750;const step=t=>{const p=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-p,3);el.textContent=fmt(to*e);if(p<1&&el.isConnected)requestAnimationFrame(step)};requestAnimationFrame(step)});
+}
+// A short burst of confetti in the app's own colours. Skipped when the phone asks for less motion.
+function confetti(){
+  if(calm())return;
+  const cs=getComputedStyle(document.documentElement);
+  const cols=["--accent","--good","--info","--warn","--supp"].map(x=>cs.getPropertyValue(x).trim()).filter(Boolean);
+  const c=document.createElement("canvas");c.className="confetti";c.setAttribute("aria-hidden","true");document.body.appendChild(c);
+  const dpr=Math.min(2,window.devicePixelRatio||1),W=innerWidth,H=innerHeight;c.width=W*dpr;c.height=H*dpr;const g=c.getContext("2d");g.scale(dpr,dpr);
+  const P=Array.from({length:Math.min(110,Math.round(W/4))},()=>({x:W/2+(Math.random()-.5)*W*.35,y:H*.32,vx:(Math.random()-.5)*9,vy:-Math.random()*9-4,r:Math.random()*Math.PI,vr:(Math.random()-.5)*.3,w:5+Math.random()*5,h:3+Math.random()*4,c:cols[Math.floor(Math.random()*cols.length)]}));
+  const t0=performance.now(),dur=1900;
+  const tick=t=>{const el=t-t0;g.clearRect(0,0,W,H);g.globalAlpha=el>dur-450?Math.max(0,(dur-el)/450):1;
+    P.forEach(p=>{p.vy+=.28;p.vx*=.99;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;g.save();g.translate(p.x,p.y);g.rotate(p.r);g.fillStyle=p.c;g.fillRect(-p.w/2,-p.h/2,p.w,p.h);g.restore()});
+    if(el<dur)requestAnimationFrame(tick);else c.remove()};
+  requestAnimationFrame(tick);
+}
+
+/* ---------- light / dark switch ---------- */
+// Auto follows the phone's setting. The choice is kept on this device only.
+const THEMES=[["auto","Theme: follows your phone",'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor" stroke="none"/></svg>'],
+  ["light","Theme: light",'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>'],
+  ["dark","Theme: dark",'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>']];
+let theme="auto";try{theme=localStorage.getItem("flTheme")||"auto"}catch(_){}
+function applyTheme(){
+  const r=document.documentElement;if(theme==="auto")delete r.dataset.theme;else r.dataset.theme=theme;
+  const t=THEMES.find(x=>x[0]===theme)||THEMES[0];const b=$("#themeBtn");if(b){b.innerHTML=t[2];b.title=t[1]+". Tap to change.";b.setAttribute("aria-label",t[1])}
+  const mc=document.querySelector('meta[name="theme-color"]');if(mc)requestAnimationFrame(()=>mc.content=getComputedStyle(r).getPropertyValue("--surface").trim());
+}
+applyTheme();
+$("#themeBtn").addEventListener("click",()=>{const i=THEMES.findIndex(x=>x[0]===theme);theme=THEMES[(i+1)%THEMES.length][0];try{localStorage.setItem("flTheme",theme)}catch(_){}applyTheme();toast(THEMES.find(x=>x[0]===theme)[1])});
+function enterArch(id){if(!viewArch)liveCanWrite=canWrite;viewArch=id;canWrite=false;quick=null;tab="overview";fxNext=true;render();window.scrollTo({top:0})}
 function exitArch(){if(viewArch){viewArch=null;canWrite=liveCanWrite??canWrite;liveCanWrite=null}}
 
 /* ---------- start a new cycle ---------- */
@@ -1572,8 +1697,8 @@ async function startNewCycle(){
     const ns={...st,cycleName:nv.name,startDate:nv.start,actualWeight:null,feedLeftKg:null,otherCosts:0,notes:""};
     ["chicks","bonus","price"].forEach(f=>{const key={chicks:"chicks",bonus:"bonusChicks",price:"pricePerChick"}[f];if(nv[f]!=="")ns[key]=Number(nv[f])});
     await db.doc("farm/setup").set(ns);
-    quick=null;scen=null;ncDraft={};tab="overview";render();window.scrollTo({top:0});
-    toast(nv.name+" started. "+name+" is saved in Year view.");
+    quick=null;scen=null;ncDraft={};tab="overview";fxNext=true;render();window.scrollTo({top:0});
+    confetti();toast(nv.name+" started. "+name+" is saved in Year view.");
   }catch(err){writeFail(err);if(btn){btn.disabled=false;btn.textContent="Try again"}}
 }
 function newCyclePanel(M){
@@ -1698,7 +1823,7 @@ document.addEventListener("click",async e=>{
       if(key.startsWith("q_")){quick=readQuick();render()}}
     return}
   const t=e.target.closest("[data-tab],[data-go],[data-add],[data-edit],[data-day],[data-act],[data-step]");if(!t)return;
-  if(t.dataset.tab||t.dataset.go){tab=t.dataset.tab||t.dataset.go;try{history.replaceState(null,"","#"+tab)}catch(_){}render();window.scrollTo({top:0});return}
+  if(t.dataset.tab||t.dataset.go){tab=t.dataset.tab||t.dataset.go;fxNext=true;try{history.replaceState(null,"","#"+tab)}catch(_){}render();window.scrollTo({top:0});return}
   if(!db)return;
   if(t.dataset.add&&canWrite!==false){openForm(t.dataset.add);return}
   if(t.dataset.edit&&canWrite!==false){const col=t.dataset.edit;const rec=S[col].find(r=>r._id===t.dataset.id);if(rec)openForm(col,rec);return}
@@ -1720,7 +1845,11 @@ document.addEventListener("click",async e=>{
     try{await db.collection("daily").doc(dayId(d)).set(rec);quick=null;
       // saving the log also ticks "deaths logged" on today's checklist
       const di=iso(todayMs());const items={...(S.checks[di]?.items||{}),deaths:true};db.collection("checks").doc(di).set({date:di,items}).catch(()=>{});
-      render();toast("Day "+d+" saved")}catch(err){writeFail(err)}}
+      render();
+      // the last day of a week with no deaths gets a small celebration
+      const M2=derive();const w=d/7;
+      if(Number.isInteger(w)&&!M2.days.slice(d-7,d).some(x=>x.deaths)){confetti();toast(`Week ${w} done with no deaths. Well done.`)}
+      else toast("Day "+d+" saved")}catch(err){writeFail(err)}}
   if(act==="saveSetup"){const out={...(S.setup||{})};delete out._id;["cycleName","startDate","notes"].forEach(k2=>out[k2]=($("#su_"+k2)?.value||"").trim());["cycleDays","chicks","bonusChicks","pricePerChick","targetWeight","actualWeight","salePrice","priceLow","priceHigh","otherCosts","coopShare"].forEach(k2=>{const v=$("#su_"+k2).value;out[k2]=v===""?null:Number(v)});
     if(!parse(out.startDate)){toast("Enter a start date first.");return}
     try{await db.doc("farm/setup").set(out);scen=null;toast("Setup saved")}catch(err){writeFail(err)}}
@@ -1734,7 +1863,8 @@ document.addEventListener("change",async e=>{
   if(t.id==="filePick"&&pending&&t.files.length){const tg=pending;pending=null;await uploadFiles([...t.files],tg);return}
   if(t.dataset.moveph&&db){const p=S.photos.find(x=>x._id===t.dataset.moveph);const M=derive();const n=Math.round(num(t.value));if(p&&n>=1&&n<=M.cycleDays&&n!==num(p.day)){const o={...p};delete o._id;o.day=n;o.date=iso(M.start+(n-1)*DAY);try{await db.collection("photos").doc(p._id).set(o);toast("Moved to day "+n)}catch(err){writeFail(err)}}return}
   if(t.dataset.cap&&db){const p=S.photos.find(x=>x._id===t.dataset.cap);if(p){const o={...p};delete o._id;o.caption=t.value.trim();try{await db.collection("photos").doc(p._id).set(o)}catch(err){writeFail(err)}}return}
-  if(t.dataset.check&&db){const d=iso(todayMs());const items={...(S.checks[d]?.items||{})};items[t.dataset.check]=t.checked;try{await db.collection("checks").doc(d).set({date:d,items})}catch(err){writeFail(err)}}
+  if(t.dataset.check&&db){const d=iso(todayMs());const items={...(S.checks[d]?.items||{})};const was=CHECK_ITEMS.every(x=>items[x[0]]);items[t.dataset.check]=t.checked;
+    try{await db.collection("checks").doc(d).set({date:d,items});if(!was&&CHECK_ITEMS.every(x=>items[x[0]])){confetti();toast("Today's checklist is done. Nice work.")}}catch(err){writeFail(err)}}
   if(t.dataset.todo&&db){const r=S.todos.find(x=>x._id===t.dataset.todo);if(r){const o={...r};delete o._id;o.done=t.checked;try{await db.collection("todos").doc(r._id).set(o)}catch(err){writeFail(err)}}}
   if(t.id==="donly"){dailyFilter.deathsOnly=t.checked;render()}
   if(t.id==="cStage"){calc.stage=t.value;render()}
@@ -1823,7 +1953,7 @@ render();
   if(user){try{const c=await user.can("data.write");canWrite=c!==false;writeUnknown=c===null}catch(_){}}
   setSync("","Syncing");
   const onErr=e=>{setSync("bad",e&&e.code==="revoked"?"Access changed":"Sync stopped")};
-  const mark=n=>{L.loaded.add(n);if(L.loaded.size>=16)syncBuyers();if(L.loaded.size>=16)setSync("ok",window.__storageLabel?window.__storageLabel():window.__assetURL?"Saved on this device":((liveCanWrite??canWrite)===false?"View only":"Saved and synced"));schedule()};
+  const mark=n=>{L.loaded.add(n);if(L.loaded.size>=16&&!fxLoaded){fxLoaded=true;fxNext=true}if(L.loaded.size>=16)syncBuyers();if(L.loaded.size>=16)setSync("ok",window.__storageLabel?window.__storageLabel():window.__assetURL?"Saved on this device":((liveCanWrite??canWrite)===false?"View only":"Saved and synced"));schedule()};
   db.doc("farm/setup").onSnapshot(s=>{L.setup=s.exists?{...s.data()}:null;mark("setup")},onErr);
   db.collection("daily").onSnapshot(q=>{const o={};q.docs.forEach(d=>o[d.id]={...d.data()});L.daily=o;mark("daily")},onErr);
   ["feed","meds","doses","todos","cycles","photos","materials","expenses","sales","buyers","weighins","vaccines","archive"].forEach(c=>db.collection(c).onSnapshot(q=>{L[c]=q.docs.map(d=>({...d.data(),_id:d.id}));mark(c)},onErr));
